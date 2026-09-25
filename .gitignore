@@ -1,0 +1,15 @@
+# Downloaded photos
+photos/
+
+# Source data
+*.csv
+
+# Image downloader script
+download_images.py
+
+# Python cache files
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
