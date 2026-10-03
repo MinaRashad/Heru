@@ -389,6 +389,13 @@ def construct_graph(
             graph.remove_nodes_from(isolated)
             log(f"Removed {len(isolated)} isolated person/node(s) with no connections (kept {len(graph.nodes)} connected nodes).")
 
+    # Assign deterministic positions so the visual graph remains stable
+    if len(graph.nodes) > 0:
+        pos = nx.spring_layout(graph, seed=42)
+        for node, (x, y) in pos.items():
+            graph.nodes[node]["x"] = round(float(x * 1000), 2)
+            graph.nodes[node]["y"] = round(float(y * 1000), 2)
+
     return graph
 
 
@@ -411,6 +418,9 @@ def export_graph_json(
             "label": node,
             "degree": graph.degree[node],
         }
+        if "x" in graph.nodes[node]:
+            node_dict["x"] = graph.nodes[node]["x"]
+            node_dict["y"] = graph.nodes[node]["y"]
         if node in crops:
             node_dict["image"] = crops[node]
         nodes_data.append(node_dict)
@@ -456,6 +466,9 @@ def export_graph_html(
 
     for person in graph.nodes:
         node = {"label": person, "title": person}
+        if "x" in graph.nodes[person]:
+            node["x"] = graph.nodes[person]["x"]
+            node["y"] = graph.nodes[person]["y"]
         if person in crops:
             node.update(image=crops[person], shape="image")
         else:
@@ -466,6 +479,7 @@ def export_graph_html(
         weight = data["weight"]
         net.add_edge(person_a, person_b, value=weight / max_weight, title=f"Score: {weight}")
 
+    net.toggle_physics(False)
     net.write_html(str(output_path), open_browser=False)
     return output_path
 
@@ -478,6 +492,7 @@ def build_graph(
     output: Path | str | None = None,
     json_output: Path | str | None = None,
     save_json: bool = True,
+    save_bundle: bool = True,
     disk_storage: bool = False,
     cache_dir: Path | str | None = None,
     grouped_faces: bool = False,
@@ -492,7 +507,7 @@ def build_graph(
     on_progress: Callable[[int, int, str], None] | None = None,
     on_image: Callable[[Path, np.ndarray | None, list[tuple[int, int, int, int]], int, str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
-) -> tuple[Path, Path | None]:
+) -> tuple[Path, Path | None, Path | None]:
     """Analyze input photos and build social network graph files (HTML and JSON).
 
     Can be invoked with an ``argparse.Namespace`` (produced by :func:`parse_args`)
@@ -519,6 +534,7 @@ def build_graph(
         output_val = args.output
         json_output_val = getattr(args, "json_output", None)
         save_json_val = not getattr(args, "no_json", False)
+        save_bundle_val = not getattr(args, "no_bundle", False)
         disk_storage_val = getattr(args, "disk_storage", False)
         cache_dir_val = getattr(args, "cache_dir", None)
         grouped_faces_val = getattr(args, "grouped_faces", False)
@@ -533,6 +549,7 @@ def build_graph(
         profiles_val = profiles
         output_val = output or Path("people_graph.html")
         json_output_val = json_output
+        save_bundle_val = save_bundle
         save_json_val = save_json
         disk_storage_val = disk_storage
         cache_dir_val = cache_dir
@@ -729,12 +746,65 @@ def build_graph(
     log(f"Saving interactive graph with {len(graph.nodes)} people and {len(graph.edges)} connections to: {output_html}")
     export_graph_html(graph=graph, crops=crops, output_path=output_html)
 
+    # Save serialized graph data bundle for continuous updates
+    output_bundle: Path | None = None
+    if save_bundle_val:
+        try:
+            set_status("Saving graph data bundle for future updates...")
+            from utilities.graph_storage import save_graph_data, serialize_crop
+            bundle_path = output_html.with_name(f"{output_html.stem}.graph_data.pkl")
+            # Compact face record crops to JPEG bytes for storage
+            compact_records = []
+            for rec in face_records:
+                c = dict(rec)
+                if c.get("crop") is not None:
+                    c["crop"] = serialize_crop(c["crop"])
+                compact_records.append(c)
+            if disk_storage_val and embeddings_path is not None:
+                import numpy as _np
+                embeddings_for_bundle = _np.array(
+                    _np.memmap(embeddings_path, dtype=_np.float32, mode="r", shape=(len(face_records), 512))
+                )
+            else:
+                embeddings_for_bundle = embeddings
+            processed_images = {str(p.resolve()) for _, p in event_images}
+            save_graph_data(
+                bundle_path,
+                graph=graph,
+                crops=crops,
+                embeddings=embeddings_for_bundle,
+                face_records=compact_records,
+                image_face_counts=image_face_counts,
+                labels=labels,
+                cluster_names=cluster_names,
+                profile_vectors=profile_vectors,
+                profile_names=profile_names,
+                processed_images=processed_images,
+                params={
+                    "eps": eps_val,
+                    "min_samples": min_samples_val,
+                    "profile_distance": profile_distance_val,
+                    "model": model_val,
+                    "ctx_id": ctx_id_val,
+                    "remove_isolated": remove_isolated_val,
+                },
+                metadata={
+                    "image_count": len(event_images),
+                    "faces_detected": len(face_records),
+                    "cluster_count": len(cluster_names),
+                },
+            )
+            output_bundle = bundle_path
+            log(f"Graph data bundle saved to: {bundle_path}")
+        except Exception as _exc:
+            log(f"Warning: could not save graph data bundle: {_exc}")
+
     log(f"Successfully processed {len(event_images)} images; detected {len(face_records)} faces; created {len(graph.nodes)} people and {len(graph.edges)} connections.")
     log(f"HTML Graph saved to: {output_html}")
     if output_json:
         log(f"JSON Graph saved to: {output_json}")
 
-    return output_html, output_json
+    return output_html, output_json, output_bundle
 
 
 def parse_args() -> argparse.Namespace:
@@ -745,6 +815,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-o", "--output", type=Path, default=Path("people_graph.html"), help="Output HTML graph (default: people_graph.html)")
     parser.add_argument("-j", "--json-output", type=Path, default=None, help="Output JSON graph path (default: <output>.json)")
     parser.add_argument("--no-json", action="store_true", help="Do not save the JSON graph file")
+    parser.add_argument("--no-bundle", action="store_true", help="Do not save the .graph_data.pkl bundle (disables continuous graph updates)")
     parser.add_argument(
         "--disk-storage",
         action="store_true",

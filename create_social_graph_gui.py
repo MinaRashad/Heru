@@ -64,12 +64,13 @@ class SocialGraphWorker(threading.Thread):
 
     def run(self):
         try:
-            html_path, json_path = build_graph(
+            html_path, json_path, bundle_path = build_graph(
                 images=self.params["images"],
                 profiles=self.params.get("profiles"),
                 output=self.params["output"],
                 json_output=self.params.get("json_output"),
                 save_json=self.params.get("save_json", True),
+                save_bundle=self.params.get("save_bundle", True),
                 disk_storage=self.params.get("disk_storage", False),
                 cache_dir=self.params.get("cache_dir"),
                 grouped_faces=self.params.get("grouped_faces", False),
@@ -85,7 +86,14 @@ class SocialGraphWorker(threading.Thread):
                 on_image=self.update_image,
                 is_cancelled=lambda: self.cancel_event.is_set(),
             )
-            self.ui_queue.put(("done", (str(html_path), str(json_path) if json_path else None)))
+            self.ui_queue.put((
+                "done",
+                (
+                    str(html_path),
+                    str(json_path) if json_path else None,
+                    str(bundle_path) if bundle_path else None,
+                ),
+            ))
 
         except InterruptedError as e:
             self.log(f"Stopped: {e}")
@@ -103,8 +111,8 @@ class SocialGraphGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Social Eye - Create Social Graph")
-        self.geometry("1100x840")
-        self.minsize(950, 720)
+        self.geometry("1100x740")
+        self.minsize(900, 580)
 
         # Apply modern style theme
         self.style = ttk.Style(self)
@@ -117,7 +125,12 @@ class SocialGraphGUI(tk.Tk):
         self.worker_thread: SocialGraphWorker | None = None
         self.last_output_path: str | None = None
         self.last_json_path: str | None = None
+        self.last_bundle_path: str | None = None
         self.preview_image_ref = None
+
+        # Manage-tab background worker
+        self.manage_worker_thread: threading.Thread | None = None
+        self.manage_cancel_event = threading.Event()
 
         self._configure_styles()
         self._build_ui()
@@ -145,7 +158,7 @@ class SocialGraphGUI(tk.Tk):
     def _build_ui(self):
         # Top banner
         banner = ttk.Frame(self, padding=(16, 12, 16, 8))
-        banner.pack(fill="x")
+        banner.pack(side="top", fill="x")
 
         title_lbl = ttk.Label(banner, text="Social Eye Graph Generator", style="Header.TLabel")
         title_lbl.pack(anchor="w")
@@ -157,26 +170,37 @@ class SocialGraphGUI(tk.Tk):
         )
         subtitle_lbl.pack(anchor="w", pady=(2, 0))
 
-        # Main splitter (PanedWindow)
-        main_paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        main_paned.pack(fill="both", expand=True, padx=14, pady=6)
+        # Bottom Bar: MUST be packed side="bottom" BEFORE notebook so it is ALWAYS visible and never pushed off-screen
+        self._build_bottom_bar()
 
-        # LEFT PANE: Parameters & Controls (in scrollable container)
+        # Main notebook (tabs): packed side="top", fill="both", expand=True
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(side="top", fill="both", expand=True, padx=14, pady=(2, 0))
+
+        # Tab 1: Create Graph
+        create_tab = ttk.Frame(self.notebook, padding=0)
+        self.notebook.add(create_tab, text="  Create Graph  ")
+        self._build_create_tab(create_tab)
+
+        # Tab 2: Manage Graph
+        manage_tab = ttk.Frame(self.notebook, padding=0)
+        self.notebook.add(manage_tab, text="  Manage Graph  ")
+        self._build_manage_tab(manage_tab)
+
+    def _build_create_tab(self, parent):
+        """Build the Create Graph tab content (parameters + live preview)."""
+        main_paned = ttk.PanedWindow(parent, orient=tk.HORIZONTAL)
+        main_paned.pack(fill="both", expand=True)
+
         left_container = ttk.Frame(main_paned, width=470)
         left_container.pack_propagate(False)
         main_paned.add(left_container, weight=1)
-
         self._build_parameters_pane(left_container)
 
-        # RIGHT PANE: Live Image Scan Preview & Console Logs
         right_container = ttk.Frame(main_paned, width=580)
         right_container.pack_propagate(False)
         main_paned.add(right_container, weight=2)
-
         self._build_preview_and_logs_pane(right_container)
-
-        # Bottom Bar: Execution buttons and Progress
-        self._build_bottom_bar()
 
     def _build_parameters_pane(self, parent):
         canvas = tk.Canvas(parent, bg="#ffffff", highlightthickness=1, highlightbackground="#e2e8f0")
@@ -385,8 +409,17 @@ class SocialGraphGUI(tk.Tk):
         )
         chk_grouped.grid(row=row, column=0, columnspan=3, sticky="w", pady=(8, 2))
         row += 1
-        h_grp = ttk.Label(scrollable_frame, text="Saves detected face crops categorized into per-person folders.", style="HelpText.TLabel")
-        h_grp.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 10))
+        # Separator & Start button inside the parameters panel for direct access
+        ttk.Separator(scrollable_frame, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 12))
+        row += 1
+
+        self.btn_start_param = ttk.Button(
+            scrollable_frame,
+            text="Start Scanning & Create Graph",
+            style="Primary.TButton",
+            command=self._start_scan,
+        )
+        self.btn_start_param.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(0, 8))
         row += 1
 
         scrollable_frame.columnconfigure(1, weight=1)
@@ -470,6 +503,419 @@ class SocialGraphGUI(tk.Tk):
             relief="flat",
         )
         self.txt_logs.pack(fill="both", expand=True)
+
+    # ── Manage Graph Tab ─────────────────────────────────────────────────────
+
+    def _build_manage_tab(self, parent):
+        """Build the Manage Graph tab: load a graph, add images, or prune."""
+        outer = ttk.Frame(parent, padding=12)
+        outer.pack(fill="both", expand=True)
+
+        # ── Section: Select Existing Graph ──────────────────────────────────
+        sec_graph = ttk.Label(outer, text="Select Existing Graph", style="Section.TLabel")
+        sec_graph.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
+
+        ttk.Label(outer, text="Graph File (.html/.json/.pkl):", style="FieldLabel.TLabel").grid(
+            row=1, column=0, sticky="w", pady=2
+        )
+        self.entry_mg_graph = ttk.Entry(outer, width=52)
+        self.entry_mg_graph.grid(row=1, column=1, sticky="ew", padx=4, pady=2)
+        ttk.Button(outer, text="Browse...", width=9, command=self._mg_browse_graph).grid(
+            row=1, column=2, sticky="e", pady=2
+        )
+
+        ttk.Label(
+            outer,
+            text="Select the output HTML, JSON, or .graph_data.pkl from a previous graph build.",
+            style="HelpText.TLabel",
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(0, 2))
+
+        # Graph info badge
+        self.lbl_mg_graph_info = ttk.Label(
+            outer, text="No graph loaded.", font=("Segoe UI", 8, "italic"), foreground="#718096"
+        )
+        self.lbl_mg_graph_info.grid(row=3, column=0, columnspan=3, sticky="w", pady=(0, 8))
+
+        ttk.Separator(outer, orient="horizontal").grid(row=4, column=0, columnspan=3, sticky="ew", pady=8)
+
+        # ── Two-column sub-panels ────────────────────────────────────────────
+        panels = ttk.Frame(outer)
+        panels.grid(row=5, column=0, columnspan=3, sticky="nsew")
+        outer.rowconfigure(5, weight=1)
+        outer.columnconfigure(1, weight=1)
+        panels.columnconfigure(0, weight=1)
+        panels.columnconfigure(1, weight=1)
+
+        # Left panel: Add New Images
+        add_card = ttk.LabelFrame(panels, text=" Add New Images (Continuous Creation) ", padding=10)
+        add_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        add_card.columnconfigure(1, weight=1)
+        self._build_mg_add_panel(add_card)
+
+        # Right panel: Prune Graph
+        prune_card = ttk.LabelFrame(panels, text=" Prune Graph (Top Degree Nodes) ", padding=10)
+        prune_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        prune_card.columnconfigure(1, weight=1)
+        self._build_mg_prune_panel(prune_card)
+
+        ttk.Separator(outer, orient="horizontal").grid(row=6, column=0, columnspan=3, sticky="ew", pady=8)
+
+        # ── Manage tab log ──────────────────────────────────────────────────
+        ttk.Label(outer, text="Manage Log", style="Section.TLabel").grid(
+            row=7, column=0, columnspan=2, sticky="w"
+        )
+        btn_clear_mg = ttk.Button(outer, text="Clear", width=7, command=self._mg_clear_log)
+        btn_clear_mg.grid(row=7, column=2, sticky="e")
+
+        self.txt_mg_logs = scrolledtext.ScrolledText(
+            outer,
+            wrap=tk.WORD,
+            height=7,
+            font=("Consolas", 9),
+            bg="#1a202c",
+            fg="#edf2f7",
+            insertbackground="#ffffff",
+            relief="flat",
+        )
+        self.txt_mg_logs.grid(row=8, column=0, columnspan=3, sticky="nsew", pady=(4, 0))
+        outer.rowconfigure(8, weight=1)
+
+    def _build_mg_add_panel(self, parent):
+        """UI widgets for the 'Add New Images' section of Manage Graph."""
+        row = 0
+        ttk.Label(
+            parent,
+            text="Folder with new images to add to the selected graph.\n"
+                 "Only unprocessed images (not in the previous graph) are scanned.",
+            style="HelpText.TLabel",
+            wraplength=300,
+        ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
+        row += 1
+
+        ttk.Label(parent, text="New Images Folder *:", style="FieldLabel.TLabel").grid(
+            row=row, column=0, sticky="w", pady=2
+        )
+        self.entry_mg_new_images = ttk.Entry(parent, width=22)
+        self.entry_mg_new_images.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
+        ttk.Button(parent, text="Browse...", width=8, command=self._mg_browse_new_images).grid(
+            row=row, column=2, sticky="e", pady=2
+        )
+        row += 1
+
+        ttk.Label(parent, text="New Profiles Folder:", style="FieldLabel.TLabel").grid(
+            row=row, column=0, sticky="w", pady=2
+        )
+        self.entry_mg_new_profiles = ttk.Entry(parent, width=22)
+        self.entry_mg_new_profiles.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
+        ttk.Button(parent, text="Browse...", width=8, command=self._mg_browse_new_profiles).grid(
+            row=row, column=2, sticky="e", pady=2
+        )
+        row += 1
+
+        ttk.Label(parent, text="Output Folder *:", style="FieldLabel.TLabel").grid(
+            row=row, column=0, sticky="w", pady=2
+        )
+        self.entry_mg_add_output = ttk.Entry(parent, width=22)
+        self.entry_mg_add_output.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
+        ttk.Button(parent, text="Browse...", width=8, command=self._mg_browse_add_output).grid(
+            row=row, column=2, sticky="e", pady=2
+        )
+        row += 1
+
+        ttk.Label(parent, text="Output filename stem (e.g. 'graph_v2' → graph_v2.html/.json/.pkl)", style="HelpText.TLabel", wraplength=300).grid(
+            row=row, column=0, columnspan=3, sticky="w", pady=(0, 4)
+        )
+        row += 1
+
+        ttk.Label(parent, text="Output Name:", style="FieldLabel.TLabel").grid(
+            row=row, column=0, sticky="w", pady=2
+        )
+        self.entry_mg_add_name = ttk.Entry(parent, width=22)
+        self.entry_mg_add_name.insert(0, "people_graph_updated")
+        self.entry_mg_add_name.grid(row=row, column=1, columnspan=2, sticky="ew", padx=4, pady=2)
+        row += 1
+
+        ttk.Separator(parent, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=6)
+        row += 1
+
+        self.btn_mg_add = ttk.Button(
+            parent,
+            text="Add Images & Update Graph",
+            style="Primary.TButton",
+            command=self._mg_run_add,
+        )
+        self.btn_mg_add.grid(row=row, column=0, columnspan=2, sticky="ew", pady=2)
+        self.btn_mg_cancel_add = ttk.Button(
+            parent, text="Cancel", style="Danger.TButton", state="disabled",
+            command=self._mg_cancel_add,
+        )
+        self.btn_mg_cancel_add.grid(row=row, column=2, sticky="e", padx=(4, 0), pady=2)
+        row += 1
+
+        self.btn_mg_open_add_result = ttk.Button(
+            parent, text="Open Updated Graph", style="Success.TButton", state="disabled",
+            command=self._mg_open_add_result,
+        )
+        self.btn_mg_open_add_result.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+
+    def _build_mg_prune_panel(self, parent):
+        """UI widgets for the 'Prune Graph' section of Manage Graph."""
+        row = 0
+        ttk.Label(
+            parent,
+            text="Keep only the top X most connected people in the graph.\n"
+                 "Nodes are ranked by degree (number of connections).",
+            style="HelpText.TLabel",
+            wraplength=300,
+        ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
+        row += 1
+
+        ttk.Label(parent, text="Top X Nodes to Keep *:", style="FieldLabel.TLabel").grid(
+            row=row, column=0, sticky="w", pady=2
+        )
+        self.spin_mg_top_x = ttk.Spinbox(parent, from_=1, to=10000, increment=1, width=10)
+        self.spin_mg_top_x.set("20")
+        self.spin_mg_top_x.grid(row=row, column=1, sticky="w", padx=4, pady=2)
+        row += 1
+
+        self.var_mg_remove_isolated = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            parent,
+            text="Remove nodes isolated after pruning",
+            variable=self.var_mg_remove_isolated,
+        ).grid(row=row, column=0, columnspan=3, sticky="w", pady=2)
+        row += 1
+
+        ttk.Label(parent, text="Output Folder *:", style="FieldLabel.TLabel").grid(
+            row=row, column=0, sticky="w", pady=2
+        )
+        self.entry_mg_prune_output = ttk.Entry(parent, width=22)
+        self.entry_mg_prune_output.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
+        ttk.Button(parent, text="Browse...", width=8, command=self._mg_browse_prune_output).grid(
+            row=row, column=2, sticky="e", pady=2
+        )
+        row += 1
+
+        ttk.Label(parent, text="Output Name:", style="FieldLabel.TLabel").grid(
+            row=row, column=0, sticky="w", pady=2
+        )
+        self.entry_mg_prune_name = ttk.Entry(parent, width=22)
+        self.entry_mg_prune_name.insert(0, "people_graph_pruned")
+        self.entry_mg_prune_name.grid(row=row, column=1, columnspan=2, sticky="ew", padx=4, pady=2)
+        row += 1
+
+        ttk.Separator(parent, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=6)
+        row += 1
+
+        self.btn_mg_prune = ttk.Button(
+            parent,
+            text="Prune Graph",
+            style="Primary.TButton",
+            command=self._mg_run_prune,
+        )
+        self.btn_mg_prune.grid(row=row, column=0, columnspan=3, sticky="ew", pady=2)
+        row += 1
+
+        self.btn_mg_open_prune_result = ttk.Button(
+            parent, text="Open Pruned Graph", style="Success.TButton", state="disabled",
+            command=self._mg_open_prune_result,
+        )
+        self.btn_mg_open_prune_result.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+
+    # ── Manage Graph: state ───────────────────────────────────────────────────
+
+    def _mg_clear_log(self):
+        self.txt_mg_logs.delete("1.0", tk.END)
+
+    def _mg_log(self, msg: str):
+        self.txt_mg_logs.insert(tk.END, msg + "\n")
+        self.txt_mg_logs.see(tk.END)
+
+    def _mg_browse_graph(self):
+        path = filedialog.askopenfilename(
+            title="Select Existing Graph File",
+            filetypes=[
+                ("Graph bundle", "*.pkl"),
+                ("JSON graph", "*.json"),
+                ("HTML graph", "*.html"),
+                ("All files", "*.*"),
+            ],
+        )
+        if path:
+            self.entry_mg_graph.delete(0, tk.END)
+            self.entry_mg_graph.insert(0, path)
+            self._mg_refresh_graph_info(path)
+
+    def _mg_refresh_graph_info(self, path: str):
+        try:
+            from utilities.graph_storage import get_graph_summary
+            info = get_graph_summary(path)
+            if info.get("valid"):
+                bundle_note = "[Bundle Available]" if info.get("has_bundle") else "[No Bundle (Pruning only)]"
+                txt = (
+                    f"Nodes: {info['nodes']}  |  Edges: {info['edges']}  |  "
+                    f"Images: {info['images']}  |  Faces: {info['faces']}  |  {bundle_note}"
+                )
+            else:
+                txt = f"[Warning] Could not read: {info.get('error', 'unknown error')}"
+        except Exception as exc:
+            txt = f"[Error] Error inspecting graph: {exc}"
+        self.lbl_mg_graph_info.configure(text=txt)
+
+    def _mg_browse_new_images(self):
+        path = filedialog.askdirectory(title="Select Folder with New Images")
+        if path:
+            self.entry_mg_new_images.delete(0, tk.END)
+            self.entry_mg_new_images.insert(0, path)
+
+    def _mg_browse_new_profiles(self):
+        path = filedialog.askdirectory(title="Select Folder with New Profile Photos (Optional)")
+        if path:
+            self.entry_mg_new_profiles.delete(0, tk.END)
+            self.entry_mg_new_profiles.insert(0, path)
+
+    def _mg_browse_add_output(self):
+        path = filedialog.askdirectory(title="Select Output Folder for Updated Graph")
+        if path:
+            self.entry_mg_add_output.delete(0, tk.END)
+            self.entry_mg_add_output.insert(0, path)
+
+    def _mg_browse_prune_output(self):
+        path = filedialog.askdirectory(title="Select Output Folder for Pruned Graph")
+        if path:
+            self.entry_mg_prune_output.delete(0, tk.END)
+            self.entry_mg_prune_output.insert(0, path)
+
+    # ── Add Images action ─────────────────────────────────────────────────────
+
+    def _mg_run_add(self):
+        from pathlib import Path
+        graph_src = self.entry_mg_graph.get().strip()
+        new_imgs = self.entry_mg_new_images.get().strip()
+        new_profs = self.entry_mg_new_profiles.get().strip() or None
+        out_folder = self.entry_mg_add_output.get().strip()
+        out_name = self.entry_mg_add_name.get().strip() or "people_graph_updated"
+
+        if not graph_src:
+            messagebox.showerror("Validation Error", "Please select an existing graph file.", parent=self)
+            return
+        if not new_imgs or not Path(new_imgs).is_dir():
+            messagebox.showerror("Validation Error", "Please select a valid folder with new images.", parent=self)
+            return
+        if not out_folder:
+            messagebox.showerror("Validation Error", "Please select an output folder.", parent=self)
+            return
+
+        out_dir = Path(out_folder)
+        out_html = out_dir / f"{out_name}.html"
+        out_json = out_dir / f"{out_name}.json"
+        out_data = out_dir / f"{out_name}.graph_data.pkl"
+
+        self.btn_mg_add.configure(state="disabled")
+        self.btn_mg_cancel_add.configure(state="normal")
+        self.btn_mg_open_add_result.configure(state="disabled")
+        self.mg_add_result_html: str | None = None
+        self.manage_cancel_event.clear()
+
+        self._mg_log(f"Starting update: adding images from '{new_imgs}' to graph '{Path(graph_src).name}'...")
+
+        def run_add():
+            try:
+                from utilities.continuous_graph import update_graph_with_images
+                html_out, json_out, data_out = update_graph_with_images(
+                    graph_source=graph_src,
+                    new_images_dir=new_imgs,
+                    new_profiles_dir=new_profs,
+                    output_html=out_html,
+                    output_json=out_json,
+                    output_data=out_data,
+                    on_log=lambda m: self.ui_queue.put(("mg_log", m)),
+                    on_status=lambda s: self.ui_queue.put(("mg_status", s)),
+                    on_progress=lambda c, t, m: self.ui_queue.put(("progress", (c, t, m))),
+                    is_cancelled=lambda: self.manage_cancel_event.is_set(),
+                )
+                self.ui_queue.put(("mg_add_done", str(html_out)))
+            except InterruptedError as e:
+                self.ui_queue.put(("mg_add_cancelled", str(e)))
+            except Exception as e:
+                self.ui_queue.put(("mg_add_error", str(e)))
+
+        self.manage_worker_thread = threading.Thread(target=run_add, daemon=True)
+        self.manage_worker_thread.start()
+
+    def _mg_cancel_add(self):
+        self.manage_cancel_event.set()
+        self.btn_mg_cancel_add.configure(state="disabled")
+        self._mg_log("Cancellation requested...")
+
+    def _mg_open_add_result(self):
+        target = getattr(self, "mg_add_result_html", None)
+        if target and os.path.exists(target):
+            webbrowser.open(Path(target).resolve().as_uri())
+        else:
+            messagebox.showwarning("File Not Found", "Updated HTML graph file not found.", parent=self)
+
+    # ── Prune action ──────────────────────────────────────────────────────────
+
+    def _mg_run_prune(self):
+        from pathlib import Path
+        graph_src = self.entry_mg_graph.get().strip()
+        out_folder = self.entry_mg_prune_output.get().strip()
+        out_name = self.entry_mg_prune_name.get().strip() or "people_graph_pruned"
+        remove_iso = self.var_mg_remove_isolated.get()
+
+        if not graph_src:
+            messagebox.showerror("Validation Error", "Please select an existing graph file.", parent=self)
+            return
+        if not out_folder:
+            messagebox.showerror("Validation Error", "Please select an output folder.", parent=self)
+            return
+
+        try:
+            top_x = int(self.spin_mg_top_x.get())
+            if top_x < 1:
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror("Validation Error", "Top X must be a positive integer.", parent=self)
+            return
+
+        out_dir = Path(out_folder)
+        out_html = out_dir / f"{out_name}.html"
+        out_json = out_dir / f"{out_name}.json"
+        out_data_path = out_dir / f"{out_name}.graph_data.pkl"
+
+        self.btn_mg_prune.configure(state="disabled")
+        self.btn_mg_open_prune_result.configure(state="disabled")
+        self.mg_prune_result_html: str | None = None
+        self._mg_log(f"Pruning graph to top {top_x} degree nodes...")
+
+        def run_prune():
+            try:
+                from utilities.graph_pruning import prune_graph_to_top_degree
+                pruned, html_p, json_p, data_p = prune_graph_to_top_degree(
+                    source=graph_src,
+                    top_x=top_x,
+                    output_html=out_html,
+                    output_json=out_json,
+                    output_data=out_data_path,
+                    remove_isolated=remove_iso,
+                    on_log=lambda m: self.ui_queue.put(("mg_log", m)),
+                    on_status=lambda s: self.ui_queue.put(("mg_status", s)),
+                )
+                self.ui_queue.put(("mg_prune_done", str(html_p) if html_p else ""))
+            except Exception as e:
+                self.ui_queue.put(("mg_prune_error", str(e)))
+
+        threading.Thread(target=run_prune, daemon=True).start()
+
+    def _mg_open_prune_result(self):
+        target = getattr(self, "mg_prune_result_html", None)
+        if target and os.path.exists(target):
+            webbrowser.open(Path(target).resolve().as_uri())
+        else:
+            messagebox.showwarning("File Not Found", "Pruned HTML graph file not found.", parent=self)
+
+    # ── Shared bottom bar ─────────────────────────────────────────────────────
 
     def _build_bottom_bar(self):
         bottom_frame = ttk.Frame(self, padding=(14, 8, 14, 12))
@@ -729,6 +1175,8 @@ class SocialGraphGUI(tk.Tk):
             return
 
         self.btn_start.configure(state="disabled")
+        if hasattr(self, "btn_start_param"):
+            self.btn_start_param.configure(state="disabled")
         self.btn_cancel.configure(state="normal")
         self.btn_open_browser.configure(state="disabled")
         self.btn_open_json.configure(state="disabled")
@@ -755,6 +1203,7 @@ class SocialGraphGUI(tk.Tk):
         try:
             while True:
                 msg_type, data = self.ui_queue.get_nowait()
+                # ── Create Graph tab messages ──────────────────────────────
                 if msg_type == "log":
                     self._log_message(data)
                 elif msg_type == "status":
@@ -771,14 +1220,49 @@ class SocialGraphGUI(tk.Tk):
                     path, image, bboxes, face_count, event = data
                     self._render_preview(path, image, bboxes, face_count, event)
                 elif msg_type == "done":
-                    html_path, json_path = data
+                    html_path, json_path, bundle_path = data
                     self.last_output_path = html_path
                     self.last_json_path = json_path
+                    self.last_bundle_path = bundle_path
                     self._on_work_completed(success=True)
                 elif msg_type == "cancelled":
                     self._on_work_completed(success=False, cancelled=True)
                 elif msg_type == "error":
                     self._on_work_completed(success=False, error_msg=data)
+                # ── Manage Graph tab messages ──────────────────────────────
+                elif msg_type == "mg_log":
+                    self._mg_log(data)
+                elif msg_type == "mg_status":
+                    self.lbl_status.configure(text=data)
+                elif msg_type == "mg_add_done":
+                    self.mg_add_result_html = data if data else None
+                    self.btn_mg_add.configure(state="normal")
+                    self.btn_mg_cancel_add.configure(state="disabled")
+                    if data and os.path.exists(data):
+                        self.btn_mg_open_add_result.configure(state="normal")
+                    self._mg_log("[Success] Graph updated successfully!")
+                    messagebox.showinfo("Success", f"Graph updated!\n\nHTML: {data}", parent=self)
+                elif msg_type == "mg_add_cancelled":
+                    self.btn_mg_add.configure(state="normal")
+                    self.btn_mg_cancel_add.configure(state="disabled")
+                    self._mg_log("[Cancelled] Update cancelled.")
+                    messagebox.showwarning("Cancelled", "Graph update was cancelled.", parent=self)
+                elif msg_type == "mg_add_error":
+                    self.btn_mg_add.configure(state="normal")
+                    self.btn_mg_cancel_add.configure(state="disabled")
+                    self._mg_log(f"[Error] {data}")
+                    messagebox.showerror("Error", f"Failed to update graph:\n\n{data}", parent=self)
+                elif msg_type == "mg_prune_done":
+                    self.mg_prune_result_html = data if data else None
+                    self.btn_mg_prune.configure(state="normal")
+                    if data and os.path.exists(data):
+                        self.btn_mg_open_prune_result.configure(state="normal")
+                    self._mg_log("[Success] Graph pruned successfully!")
+                    messagebox.showinfo("Success", f"Graph pruned!\n\nHTML: {data}", parent=self)
+                elif msg_type == "mg_prune_error":
+                    self.btn_mg_prune.configure(state="normal")
+                    self._mg_log(f"[Error] {data}")
+                    messagebox.showerror("Error", f"Failed to prune graph:\n\n{data}", parent=self)
         except queue.Empty:
             pass
         finally:
@@ -827,6 +1311,8 @@ class SocialGraphGUI(tk.Tk):
 
     def _on_work_completed(self, success: bool, cancelled: bool = False, error_msg: str = ""):
         self.btn_start.configure(state="normal")
+        if hasattr(self, "btn_start_param"):
+            self.btn_start_param.configure(state="normal")
         self.btn_cancel.configure(state="disabled")
 
         if success:
