@@ -1,8 +1,8 @@
 """Graph pruning utilities for Social Eye.
 
-Provides functionality to prune social networks to the top X highest-degree nodes
-(the most connected individuals) and export the pruned network to HTML, JSON,
-and serialized graph bundles.
+Provides functionality to prune social networks to the top X most popular nodes
+(ranked by popularity score: 50 points per distinct event plus connections)
+and export the pruned network to HTML, JSON, and serialized graph bundles.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from utilities.graph_storage import (
 )
 
 
-def prune_graph_to_top_degree(
+def prune_graph_to_top_popularity(
     source: Path | str | nx.Graph,
     top_x: int,
     *,
@@ -40,14 +40,17 @@ def prune_graph_to_top_degree(
     on_log: Callable[[str], None] | None = None,
     on_status: Callable[[str], None] | None = None,
 ) -> tuple[nx.Graph, Path | None, Path | None, Path | None]:
-    """Prune graph to retain only the top X nodes with the highest degree (most connections).
+    """Prune graph to retain only the top X nodes with the highest popularity score.
+
+    Popularity is calculated as 50 points for each distinct event the person appears
+    in, plus their in-degree (number of connections in the graph).
 
     Parameters
     ----------
     source : Path, str, or nx.Graph
         Source graph. Can be a NetworkX Graph, or path to a .graph_data.pkl, .json, or .html file.
     top_x : int
-        Number of top degree nodes to keep (must be >= 1).
+        Number of top popularity nodes to keep (must be >= 1).
     crops : dict[str, str], optional
         Mapping of person name -> base64 crop URI (used if source is nx.Graph).
     output_html : Path or str, optional
@@ -114,6 +117,22 @@ def prune_graph_to_top_degree(
         else:
             raise ValueError(f"Unsupported graph source format: {src_path}")
 
+    # Ensure all nodes have a popularity score computed
+    for n in graph.nodes:
+        if "popularity" not in graph.nodes[n]:
+            if bundle and "face_records" in bundle:
+                c_names = bundle.get("cluster_names", {})
+                labels = bundle.get("labels", [])
+                records = bundle.get("face_records", [])
+                person_events = set()
+                for rec, lbl in zip(records, labels):
+                    if lbl >= 0 and c_names.get(int(lbl)) == n:
+                        person_events.add(rec.get("event", ""))
+                graph.nodes[n]["event_count"] = len(person_events)
+                graph.nodes[n]["popularity"] = (len(person_events) * 50) + graph.degree[n]
+            else:
+                graph.nodes[n]["popularity"] = graph.degree[n]
+
     total_nodes = len(graph.nodes)
     total_edges = len(graph.edges)
     log(f"Input graph contains {total_nodes} nodes and {total_edges} connections.")
@@ -121,26 +140,28 @@ def prune_graph_to_top_degree(
     if total_nodes == 0:
         raise ValueError("Cannot prune an empty graph (0 nodes).")
 
-    set_status(f"Pruning graph to top {top_x} degree nodes...")
+    set_status(f"Pruning graph to top {top_x} most popular nodes...")
     if top_x >= total_nodes:
         log(f"Graph node count ({total_nodes}) is <= top {top_x}. No nodes removed.")
         pruned_graph = graph.copy()
         kept_nodes = set(graph.nodes)
     else:
-        # Rank nodes by degree descending; break ties by sum of edge weights descending, then node name
+        # Rank nodes by popularity descending; break ties by degree descending, weighted degree descending, then node name
         def sort_key(n: str):
+            pop = graph.nodes[n].get("popularity", graph.degree[n])
             deg = graph.degree[n]
             weighted_deg = sum(d.get("weight", 1) for _, _, d in graph.edges(n, data=True))
-            return (-deg, -weighted_deg, str(n))
+            return (-pop, -deg, -weighted_deg, str(n))
 
         sorted_nodes = sorted(graph.nodes, key=sort_key)
         kept_nodes = set(sorted_nodes[:top_x])
         pruned_nodes = set(sorted_nodes[top_x:])
 
-        log(f"Keeping top {len(kept_nodes)} most connected people, pruning {len(pruned_nodes)} people:")
+        log(f"Keeping top {len(kept_nodes)} most popular people, pruning {len(pruned_nodes)} people:")
         for idx, n in enumerate(sorted_nodes[:top_x], start=1):
+            pop = graph.nodes[n].get("popularity", graph.degree[n])
             deg = graph.degree[n]
-            log(f"  #{idx}: {n} (degree = {deg})")
+            log(f"  #{idx}: {n} (popularity = {pop}, degree = {deg})")
 
         pruned_graph = graph.subgraph(kept_nodes).copy()
 
@@ -172,6 +193,7 @@ def prune_graph_to_top_degree(
         metadata = {
             "pruned": True,
             "pruned_top_x": top_x,
+            "pruned_by": "popularity",
             "original_nodes": total_nodes,
             "original_edges": total_edges,
             "kept_nodes": pruned_node_count,
@@ -201,6 +223,7 @@ def prune_graph_to_top_degree(
             metadata={
                 **bundle.get("metadata", {}),
                 "pruned_top_x": top_x,
+                "pruned_by": "popularity",
             },
         )
         log(f"Pruned graph bundle exported to: {out_data_path}")
@@ -209,11 +232,15 @@ def prune_graph_to_top_degree(
     return pruned_graph, out_html_path, out_json_path, out_data_path
 
 
+# Backwards compatibility alias
+prune_graph_to_top_degree = prune_graph_to_top_popularity
+
+
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments for pruning a graph."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("graph", type=Path, help="Path to input graph (.graph_data.pkl, .json, or .html)")
-    parser.add_argument("-x", "--top-x", type=int, required=True, help="Number of top degree nodes to keep")
+    parser.add_argument("-x", "--top-x", type=int, required=True, help="Number of top popularity nodes to keep")
     parser.add_argument("-o", "--output", type=Path, default=None, help="Output pruned HTML graph (default: <stem>_top<X>.html)")
     parser.add_argument("-j", "--json-output", type=Path, default=None, help="Output pruned JSON graph (default: <output>.json)")
     parser.add_argument("--remove-isolated", action="store_true", help="Remove nodes that become isolated after edge pruning")
@@ -233,7 +260,7 @@ def main():
     if not out_json:
         out_json = out_html.with_suffix(".json")
 
-    prune_graph_to_top_degree(
+    prune_graph_to_top_popularity(
         source=src,
         top_x=top_x,
         output_html=out_html,

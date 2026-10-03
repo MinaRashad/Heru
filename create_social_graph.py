@@ -14,6 +14,10 @@ contributes 1 point. Edge scores are accumulated and shown in the interactive
 HTML graph. Faces DBSCAN marks as noise are omitted. Nodes without connections
 (isolated nodes) are removed by default.
 
+Each person in the graph receives a popularity score: every time someone appears
+in an event, they gain 50 points, plus their in-degree (number of connections)
+at the end.
+
 Graph data is exported both as an interactive PyVis HTML visualization and
 as a structured JSON file.
 
@@ -389,6 +393,20 @@ def construct_graph(
             graph.remove_nodes_from(isolated)
             log(f"Removed {len(isolated)} isolated person/node(s) with no connections (kept {len(graph.nodes)} connected nodes).")
 
+    # Calculate popularity score for each person:
+    # 50 points for each distinct event the person appears in, plus in-degree (number of connections)
+    person_events: dict[str, set[str]] = defaultdict(set)
+    for event, people in event_people.items():
+        for person in people:
+            person_events[person].add(event)
+
+    for person in graph.nodes:
+        num_events = len(person_events.get(person, set()))
+        deg = graph.degree[person]
+        popularity = (num_events * 50) + deg
+        graph.nodes[person]["event_count"] = num_events
+        graph.nodes[person]["popularity"] = popularity
+
     # Assign deterministic positions so the visual graph remains stable
     if len(graph.nodes) > 0:
         pos = nx.spring_layout(graph, seed=42)
@@ -417,7 +435,10 @@ def export_graph_json(
             "id": node,
             "label": node,
             "degree": graph.degree[node],
+            "popularity": graph.nodes[node].get("popularity", graph.degree[node]),
         }
+        if "event_count" in graph.nodes[node]:
+            node_dict["event_count"] = graph.nodes[node]["event_count"]
         if "x" in graph.nodes[node]:
             node_dict["x"] = graph.nodes[node]["x"]
             node_dict["y"] = graph.nodes[node]["y"]
@@ -465,7 +486,15 @@ def export_graph_html(
     net = Network(height="800px", width="100%", directed=False, bgcolor="#ffffff", font_color="#222222")
 
     for person in graph.nodes:
-        node = {"label": person, "title": person}
+        pop = graph.nodes[person].get("popularity")
+        deg = graph.degree[person]
+        if pop is not None:
+            evt_cnt = graph.nodes[person].get("event_count")
+            evt_str = f"Events: {evt_cnt} | " if evt_cnt is not None else ""
+            title = f"{person}\nPopularity: {pop}\n({evt_str}Connections: {deg})"
+        else:
+            title = person
+        node = {"label": person, "title": title}
         if "x" in graph.nodes[person]:
             node["x"] = graph.nodes[person]["x"]
             node["y"] = graph.nodes[person]["y"]

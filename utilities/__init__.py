@@ -2,7 +2,7 @@
 
 Contains scripts and modules for:
 - Continuous social graph creation (adding more images to an existing graph).
-- Graph pruning (filtering to top X highest-degree nodes).
+- Graph pruning (filtering to top X most popular nodes).
 - Serializing and loading complete graph feature bundles.
 """
 
@@ -15,7 +15,7 @@ from utilities.graph_storage import (
     save_graph_data,
     serialize_crop,
 )
-from utilities.graph_pruning import prune_graph_to_top_degree
+from utilities.graph_pruning import prune_graph_to_top_degree, prune_graph_to_top_popularity
 from utilities.continuous_graph import update_graph_with_images
 
 __all__ = [
@@ -27,5 +27,6 @@ __all__ = [
     "save_graph_data",
     "serialize_crop",
     "prune_graph_to_top_degree",
+    "prune_graph_to_top_popularity",
     "update_graph_with_images",
 ]

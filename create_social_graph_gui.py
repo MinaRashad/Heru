@@ -553,7 +553,7 @@ class SocialGraphGUI(tk.Tk):
         self._build_mg_add_panel(add_card)
 
         # Right panel: Prune Graph
-        prune_card = ttk.LabelFrame(panels, text=" Prune Graph (Top Degree Nodes) ", padding=10)
+        prune_card = ttk.LabelFrame(panels, text=" Prune Graph (Top Popularity Nodes) ", padding=10)
         prune_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         prune_card.columnconfigure(1, weight=1)
         self._build_mg_prune_panel(prune_card)
@@ -663,8 +663,8 @@ class SocialGraphGUI(tk.Tk):
         row = 0
         ttk.Label(
             parent,
-            text="Keep only the top X most connected people in the graph.\n"
-                 "Nodes are ranked by degree (number of connections).",
+            text="Keep only the top X most popular people in the graph.\n"
+                 "Nodes are ranked by popularity score (events attended + connections).",
             style="HelpText.TLabel",
             wraplength=300,
         ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
@@ -886,13 +886,13 @@ class SocialGraphGUI(tk.Tk):
 
         self.btn_mg_prune.configure(state="disabled")
         self.btn_mg_open_prune_result.configure(state="disabled")
-        self.mg_prune_result_html: str | None = None
-        self._mg_log(f"Pruning graph to top {top_x} degree nodes...")
+        self.mg_prune_result_html = None
+        self._mg_log(f"Pruning graph to top {top_x} most popular nodes...")
 
         def run_prune():
             try:
-                from utilities.graph_pruning import prune_graph_to_top_degree
-                pruned, html_p, json_p, data_p = prune_graph_to_top_degree(
+                from utilities.graph_pruning import prune_graph_to_top_popularity
+                pruned, html_p, json_p, data_p = prune_graph_to_top_popularity(
                     source=graph_src,
                     top_x=top_x,
                     output_html=out_html,
