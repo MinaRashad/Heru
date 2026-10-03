@@ -417,6 +417,28 @@ def construct_graph(
     return graph
 
 
+def weight_to_color(weight: float, min_w: float, max_w: float) -> str:
+    """Map connection weight to a hex color from cool blue (weak) to warm red (strong)."""
+    if max_w <= min_w:
+        t = 1.0
+    else:
+        t = max(0.0, min(1.0, (weight - min_w) / (max_w - min_w)))
+
+    # Gradient: cool blue (t=0.0) -> purple (t=0.5) -> bright red (t=1.0)
+    if t < 0.5:
+        factor = t / 0.5
+        r = int(96 + factor * (139 - 96))
+        g = int(165 + factor * (92 - 165))
+        b = int(250 + factor * (246 - 250))
+    else:
+        factor = (t - 0.5) / 0.5
+        r = int(139 + factor * (239 - 139))
+        g = int(92 + factor * (68 - 92))
+        b = int(246 + factor * (68 - 246))
+
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
 def export_graph_json(
     graph: nx.Graph,
     crops: dict[str, str],
@@ -427,7 +449,9 @@ def export_graph_json(
     output_path = output_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    max_weight = max((data.get("weight", 1) for _, _, data in graph.edges(data=True)), default=1)
+    weights = [data.get("weight", 1) for _, _, data in graph.edges(data=True)]
+    min_weight = min(weights, default=1)
+    max_weight = max(weights, default=1)
 
     nodes_data = []
     for node in sorted(graph.nodes):
@@ -454,6 +478,7 @@ def export_graph_json(
             "target": v,
             "weight": weight,
             "value": round(weight / max_weight, 4),
+            "color": weight_to_color(weight, min_weight, max_weight),
         })
 
     graph_payload = {
@@ -482,7 +507,9 @@ def export_graph_html(
     output_path = output_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    max_weight = max((data.get("weight", 1) for _, _, data in graph.edges(data=True)), default=1)
+    weights = [data.get("weight", 1) for _, _, data in graph.edges(data=True)]
+    min_weight = min(weights, default=1)
+    max_weight = max(weights, default=1)
     net = Network(height="800px", width="100%", directed=False, bgcolor="#ffffff", font_color="#222222")
 
     for person in graph.nodes:
@@ -506,7 +533,8 @@ def export_graph_html(
 
     for person_a, person_b, data in graph.edges(data=True):
         weight = data["weight"]
-        net.add_edge(person_a, person_b, value=weight / max_weight, title=f"Score: {weight}")
+        edge_color = weight_to_color(weight, min_weight, max_weight)
+        net.add_edge(person_a, person_b, color=edge_color, width=2, title=f"Score: {weight}")
 
     net.toggle_physics(False)
     net.write_html(str(output_path), open_browser=False)
