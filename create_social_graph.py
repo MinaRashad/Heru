@@ -379,12 +379,18 @@ def construct_graph(
             for person_b in members[i + 1:]:
                 graph.add_edge(person_a, person_b, weight=graph.get_edge_data(person_a, person_b, {}).get("weight", 0) + points)
 
-    # Sharing an event adds 1 point
-    for people in event_people.values():
-        members = sorted(people)
-        for i, person_a in enumerate(members):
-            for person_b in members[i + 1:]:
-                graph.add_edge(person_a, person_b, weight=graph.get_edge_data(person_a, person_b, {}).get("weight", 0) + 1)
+    # Sharing an event adds 1 point, but only when there are multiple distinct events.
+    # With a single event (flat folder), every person trivially shares it, which would
+    # connect all people to each other and add noise rather than social signal.
+    multiple_events = len(event_people) > 1
+    if multiple_events:
+        for people in event_people.values():
+            members = sorted(people)
+            for i, person_a in enumerate(members):
+                for person_b in members[i + 1:]:
+                    graph.add_edge(person_a, person_b, weight=graph.get_edge_data(person_a, person_b, {}).get("weight", 0) + 1)
+    else:
+        log("Single event detected (flat folder): skipping event co-occurrence edges to avoid connecting all people.")
 
     # Remove nodes without edges (isolated nodes)
     if remove_isolated:
@@ -394,14 +400,15 @@ def construct_graph(
             log(f"Removed {len(isolated)} isolated person/node(s) with no connections (kept {len(graph.nodes)} connected nodes).")
 
     # Calculate popularity score for each person:
-    # 50 points for each distinct event the person appears in, plus in-degree (number of connections)
+    # 50 points for each distinct event the person appears in (only meaningful when
+    # multiple events exist), plus in-degree (number of connections).
     person_events: dict[str, set[str]] = defaultdict(set)
     for event, people in event_people.items():
         for person in people:
             person_events[person].add(event)
 
     for person in graph.nodes:
-        num_events = len(person_events.get(person, set()))
+        num_events = len(person_events.get(person, set())) if multiple_events else 0
         deg = graph.degree[person]
         popularity = (num_events * 50) + deg
         graph.nodes[person]["event_count"] = num_events
