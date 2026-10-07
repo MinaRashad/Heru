@@ -86,14 +86,16 @@ class SocialGraphWorker(threading.Thread):
                 on_image=self.update_image,
                 is_cancelled=lambda: self.cancel_event.is_set(),
             )
-            self.ui_queue.put((
-                "done",
+            self.ui_queue.put(
                 (
-                    str(html_path),
-                    str(json_path) if json_path else None,
-                    str(bundle_path) if bundle_path else None,
-                ),
-            ))
+                    "done",
+                    (
+                        str(html_path),
+                        str(json_path) if json_path else None,
+                        str(bundle_path) if bundle_path else None,
+                    ),
+                )
+            )
 
         except InterruptedError as e:
             self.log(f"Stopped: {e}")
@@ -144,14 +146,46 @@ class SocialGraphGUI(tk.Tk):
         self.style.configure(".", background="#f4f6f9", font=("Segoe UI", 9))
         self.style.configure("TFrame", background="#f4f6f9")
         self.style.configure("Card.TFrame", background="#ffffff", relief="flat")
-        self.style.configure("Header.TLabel", font=("Segoe UI", 14, "bold"), background="#f4f6f9", foreground="#1a202c")
-        self.style.configure("Section.TLabel", font=("Segoe UI", 10, "bold"), background="#ffffff", foreground="#2b6cb0")
-        self.style.configure("FieldLabel.TLabel", font=("Segoe UI", 9), background="#ffffff", foreground="#4a5568")
-        self.style.configure("HelpText.TLabel", font=("Segoe UI", 8), background="#ffffff", foreground="#718096")
-        self.style.configure("Status.TLabel", font=("Segoe UI", 9, "bold"), background="#ffffff", foreground="#2b6cb0")
-        self.style.configure("Scanning.TLabel", font=("Segoe UI", 9), background="#ffffff", foreground="#1a202c")
+        self.style.configure(
+            "Header.TLabel",
+            font=("Segoe UI", 14, "bold"),
+            background="#f4f6f9",
+            foreground="#1a202c",
+        )
+        self.style.configure(
+            "Section.TLabel",
+            font=("Segoe UI", 10, "bold"),
+            background="#ffffff",
+            foreground="#2b6cb0",
+        )
+        self.style.configure(
+            "FieldLabel.TLabel",
+            font=("Segoe UI", 9),
+            background="#ffffff",
+            foreground="#4a5568",
+        )
+        self.style.configure(
+            "HelpText.TLabel",
+            font=("Segoe UI", 8),
+            background="#ffffff",
+            foreground="#718096",
+        )
+        self.style.configure(
+            "Status.TLabel",
+            font=("Segoe UI", 9, "bold"),
+            background="#ffffff",
+            foreground="#2b6cb0",
+        )
+        self.style.configure(
+            "Scanning.TLabel",
+            font=("Segoe UI", 9),
+            background="#ffffff",
+            foreground="#1a202c",
+        )
 
-        self.style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"), padding=6)
+        self.style.configure(
+            "Primary.TButton", font=("Segoe UI", 10, "bold"), padding=6
+        )
         self.style.configure("Danger.TButton", font=("Segoe UI", 10, "bold"), padding=6)
         self.style.configure("Success.TButton", font=("Segoe UI", 9, "bold"), padding=5)
 
@@ -160,7 +194,9 @@ class SocialGraphGUI(tk.Tk):
         banner = ttk.Frame(self, padding=(16, 12, 16, 8))
         banner.pack(side="top", fill="x")
 
-        title_lbl = ttk.Label(banner, text="Social Eye Graph Generator", style="Header.TLabel")
+        title_lbl = ttk.Label(
+            banner, text="Social Eye Graph Generator", style="Header.TLabel"
+        )
         title_lbl.pack(anchor="w")
         subtitle_lbl = ttk.Label(
             banner,
@@ -203,13 +239,14 @@ class SocialGraphGUI(tk.Tk):
         self._build_preview_and_logs_pane(right_container)
 
     def _build_parameters_pane(self, parent):
-        canvas = tk.Canvas(parent, bg="#ffffff", highlightthickness=1, highlightbackground="#e2e8f0")
+        canvas = tk.Canvas(
+            parent, bg="#ffffff", highlightthickness=1, highlightbackground="#e2e8f0"
+        )
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas, style="Card.TFrame", padding=14)
 
         scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         window_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
 
@@ -225,72 +262,113 @@ class SocialGraphGUI(tk.Tk):
         # Enable mousewheel scrolling
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
         canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         row = 0
         # Section 1: Paths & Files
-        sec1 = ttk.Label(scrollable_frame, text="1. Paths & Folders", style="Section.TLabel")
+        sec1 = ttk.Label(
+            scrollable_frame, text="1. Paths & Folders", style="Section.TLabel"
+        )
         sec1.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
 
         # Images folder
-        lbl_img = ttk.Label(scrollable_frame, text="Images Folder *:", style="FieldLabel.TLabel")
+        lbl_img = ttk.Label(
+            scrollable_frame, text="Images Folder *:", style="FieldLabel.TLabel"
+        )
         lbl_img.grid(row=row, column=0, sticky="w", pady=2)
         self.entry_images = ttk.Entry(scrollable_frame, width=28)
         self.entry_images.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-        btn_browse_img = ttk.Button(scrollable_frame, text="Browse...", width=9, command=self._browse_images)
+        btn_browse_img = ttk.Button(
+            scrollable_frame, text="Browse...", width=9, command=self._browse_images
+        )
         btn_browse_img.grid(row=row, column=2, sticky="e", pady=2)
         row += 1
-        h1 = ttk.Label(scrollable_frame, text="Root folder containing photos directly or in event subfolders.", style="HelpText.TLabel")
+        h1 = ttk.Label(
+            scrollable_frame,
+            text="Root folder containing photos directly or in event subfolders.",
+            style="HelpText.TLabel",
+        )
         h1.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
 
         # Profiles folder
-        lbl_prof = ttk.Label(scrollable_frame, text="Profiles Folder:", style="FieldLabel.TLabel")
+        lbl_prof = ttk.Label(
+            scrollable_frame, text="Profiles Folder:", style="FieldLabel.TLabel"
+        )
         lbl_prof.grid(row=row, column=0, sticky="w", pady=2)
         self.entry_profiles = ttk.Entry(scrollable_frame, width=28)
         self.entry_profiles.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-        btn_browse_prof = ttk.Button(scrollable_frame, text="Browse...", width=9, command=self._browse_profiles)
+        btn_browse_prof = ttk.Button(
+            scrollable_frame, text="Browse...", width=9, command=self._browse_profiles
+        )
         btn_browse_prof.grid(row=row, column=2, sticky="e", pady=2)
         row += 1
-        h2 = ttk.Label(scrollable_frame, text="Optional folder of named profile photos to label identities.", style="HelpText.TLabel")
+        h2 = ttk.Label(
+            scrollable_frame,
+            text="Optional folder of named profile photos to label identities.",
+            style="HelpText.TLabel",
+        )
         h2.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
 
         # Output HTML
-        lbl_out = ttk.Label(scrollable_frame, text="Output HTML *:", style="FieldLabel.TLabel")
+        lbl_out = ttk.Label(
+            scrollable_frame, text="Output HTML *:", style="FieldLabel.TLabel"
+        )
         lbl_out.grid(row=row, column=0, sticky="w", pady=2)
         self.entry_output = ttk.Entry(scrollable_frame, width=28)
         self.entry_output.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-        btn_browse_out = ttk.Button(scrollable_frame, text="Save As...", width=9, command=self._browse_output)
+        btn_browse_out = ttk.Button(
+            scrollable_frame, text="Save As...", width=9, command=self._browse_output
+        )
         btn_browse_out.grid(row=row, column=2, sticky="e", pady=2)
         row += 1
-        h3 = ttk.Label(scrollable_frame, text="Destination path for the standalone interactive HTML graph.", style="HelpText.TLabel")
+        h3 = ttk.Label(
+            scrollable_frame,
+            text="Destination path for the standalone interactive HTML graph.",
+            style="HelpText.TLabel",
+        )
         h3.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
 
         # Output JSON
-        lbl_json = ttk.Label(scrollable_frame, text="Output JSON *:", style="FieldLabel.TLabel")
+        lbl_json = ttk.Label(
+            scrollable_frame, text="Output JSON *:", style="FieldLabel.TLabel"
+        )
         lbl_json.grid(row=row, column=0, sticky="w", pady=2)
         self.entry_json = ttk.Entry(scrollable_frame, width=28)
         self.entry_json.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-        btn_browse_json = ttk.Button(scrollable_frame, text="Save As...", width=9, command=self._browse_json)
+        btn_browse_json = ttk.Button(
+            scrollable_frame, text="Save As...", width=9, command=self._browse_json
+        )
         btn_browse_json.grid(row=row, column=2, sticky="e", pady=2)
         row += 1
-        h_json = ttk.Label(scrollable_frame, text="Destination path for the structured graph JSON file (nodes & edges).", style="HelpText.TLabel")
+        h_json = ttk.Label(
+            scrollable_frame,
+            text="Destination path for the structured graph JSON file (nodes & edges).",
+            style="HelpText.TLabel",
+        )
         h_json.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 10))
         row += 1
 
         # Separator
-        ttk.Separator(scrollable_frame, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=8)
+        ttk.Separator(scrollable_frame, orient="horizontal").grid(
+            row=row, column=0, columnspan=3, sticky="ew", pady=8
+        )
         row += 1
 
         # Section 2: Model & Execution Device
-        sec2 = ttk.Label(scrollable_frame, text="2. Model & Execution Device", style="Section.TLabel")
+        sec2 = ttk.Label(
+            scrollable_frame, text="2. Model & Execution Device", style="Section.TLabel"
+        )
         sec2.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
 
-        lbl_model = ttk.Label(scrollable_frame, text="InsightFace Model:", style="FieldLabel.TLabel")
+        lbl_model = ttk.Label(
+            scrollable_frame, text="InsightFace Model:", style="FieldLabel.TLabel"
+        )
         lbl_model.grid(row=row, column=0, sticky="w", pady=2)
         self.combo_model = ttk.Combobox(
             scrollable_frame,
@@ -298,13 +376,21 @@ class SocialGraphGUI(tk.Tk):
             state="normal",
             width=26,
         )
-        self.combo_model.grid(row=row, column=1, columnspan=2, sticky="w", padx=4, pady=2)
+        self.combo_model.grid(
+            row=row, column=1, columnspan=2, sticky="w", padx=4, pady=2
+        )
         row += 1
-        h_model = ttk.Label(scrollable_frame, text="buffalo_l provides the highest face recognition accuracy.", style="HelpText.TLabel")
+        h_model = ttk.Label(
+            scrollable_frame,
+            text="buffalo_l provides the highest face recognition accuracy.",
+            style="HelpText.TLabel",
+        )
         h_model.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
 
-        lbl_ctx = ttk.Label(scrollable_frame, text="Execution Device:", style="FieldLabel.TLabel")
+        lbl_ctx = ttk.Label(
+            scrollable_frame, text="Execution Device:", style="FieldLabel.TLabel"
+        )
         lbl_ctx.grid(row=row, column=0, sticky="w", pady=2)
         self.combo_ctx = ttk.Combobox(
             scrollable_frame,
@@ -314,46 +400,90 @@ class SocialGraphGUI(tk.Tk):
         )
         self.combo_ctx.grid(row=row, column=1, columnspan=2, sticky="w", padx=4, pady=2)
         row += 1
-        h_ctx = ttk.Label(scrollable_frame, text="-1 uses CPU (recommended if CUDA/GPU is not configured).", style="HelpText.TLabel")
+        h_ctx = ttk.Label(
+            scrollable_frame,
+            text="-1 uses CPU (recommended if CUDA/GPU is not configured).",
+            style="HelpText.TLabel",
+        )
         h_ctx.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 10))
         row += 1
 
         # Separator
-        ttk.Separator(scrollable_frame, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=8)
+        ttk.Separator(scrollable_frame, orient="horizontal").grid(
+            row=row, column=0, columnspan=3, sticky="ew", pady=8
+        )
         row += 1
 
         # Section 3: Clustering & Graph Rules
-        sec3 = ttk.Label(scrollable_frame, text="3. Clustering & Graph Options", style="Section.TLabel")
+        sec3 = ttk.Label(
+            scrollable_frame,
+            text="3. Clustering & Graph Options",
+            style="Section.TLabel",
+        )
         sec3.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
 
         # eps
-        lbl_eps = ttk.Label(scrollable_frame, text="DBSCAN eps:", style="FieldLabel.TLabel")
+        lbl_eps = ttk.Label(
+            scrollable_frame, text="DBSCAN eps:", style="FieldLabel.TLabel"
+        )
         lbl_eps.grid(row=row, column=0, sticky="w", pady=2)
-        self.spin_eps = ttk.Spinbox(scrollable_frame, from_=0.05, to=1.50, increment=0.01, format="%.2f", width=12)
+        self.spin_eps = ttk.Spinbox(
+            scrollable_frame,
+            from_=0.05,
+            to=1.50,
+            increment=0.01,
+            format="%.2f",
+            width=12,
+        )
         self.spin_eps.grid(row=row, column=1, sticky="w", padx=4, pady=2)
         row += 1
-        h_eps = ttk.Label(scrollable_frame, text="Cosine distance threshold (default 0.45; lower=stricter, higher=looser).", style="HelpText.TLabel")
+        h_eps = ttk.Label(
+            scrollable_frame,
+            text="Cosine distance threshold (default 0.45; lower=stricter, higher=looser).",
+            style="HelpText.TLabel",
+        )
         h_eps.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
 
         # min_samples
-        lbl_ms = ttk.Label(scrollable_frame, text="Min Samples:", style="FieldLabel.TLabel")
+        lbl_ms = ttk.Label(
+            scrollable_frame, text="Min Samples:", style="FieldLabel.TLabel"
+        )
         lbl_ms.grid(row=row, column=0, sticky="w", pady=2)
-        self.spin_min_samples = ttk.Spinbox(scrollable_frame, from_=1, to=100, increment=1, width=12)
+        self.spin_min_samples = ttk.Spinbox(
+            scrollable_frame, from_=1, to=100, increment=1, width=12
+        )
         self.spin_min_samples.grid(row=row, column=1, sticky="w", padx=4, pady=2)
         row += 1
-        h_ms = ttk.Label(scrollable_frame, text="Minimum face occurrences to establish a distinct person (default: 2).", style="HelpText.TLabel")
+        h_ms = ttk.Label(
+            scrollable_frame,
+            text="Minimum face occurrences to establish a distinct person (default: 2).",
+            style="HelpText.TLabel",
+        )
         h_ms.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
 
         # profile_distance
-        lbl_pd = ttk.Label(scrollable_frame, text="Profile Distance:", style="FieldLabel.TLabel")
+        lbl_pd = ttk.Label(
+            scrollable_frame, text="Profile Distance:", style="FieldLabel.TLabel"
+        )
         lbl_pd.grid(row=row, column=0, sticky="w", pady=2)
-        self.spin_profile_dist = ttk.Spinbox(scrollable_frame, from_=0.05, to=1.50, increment=0.01, format="%.2f", width=12)
+        self.spin_profile_dist = ttk.Spinbox(
+            scrollable_frame,
+            from_=0.05,
+            to=1.50,
+            increment=0.01,
+            format="%.2f",
+            width=12,
+        )
         self.spin_profile_dist.grid(row=row, column=1, sticky="w", padx=4, pady=2)
         row += 1
-        h_pd = ttk.Label(scrollable_frame, text="Maximum cosine distance to match profile photo name (default: 0.55).", style="HelpText.TLabel")
+        h_pd = ttk.Label(
+            scrollable_frame,
+            text="Maximum cosine distance to match profile photo name (default: 0.55).",
+            style="HelpText.TLabel",
+        )
         h_pd.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
 
@@ -366,16 +496,24 @@ class SocialGraphGUI(tk.Tk):
         )
         chk_isolated.grid(row=row, column=0, columnspan=3, sticky="w", pady=2)
         row += 1
-        h_iso = ttk.Label(scrollable_frame, text="Omits people who have no connections to anyone else in the network.", style="HelpText.TLabel")
+        h_iso = ttk.Label(
+            scrollable_frame,
+            text="Omits people who have no connections to anyone else in the network.",
+            style="HelpText.TLabel",
+        )
         h_iso.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 10))
         row += 1
 
         # Separator
-        ttk.Separator(scrollable_frame, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=8)
+        ttk.Separator(scrollable_frame, orient="horizontal").grid(
+            row=row, column=0, columnspan=3, sticky="ew", pady=8
+        )
         row += 1
 
         # Section 4: Storage & Output Options
-        sec4 = ttk.Label(scrollable_frame, text="4. Storage & Export Options", style="Section.TLabel")
+        sec4 = ttk.Label(
+            scrollable_frame, text="4. Storage & Export Options", style="Section.TLabel"
+        )
         sec4.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
 
@@ -388,16 +526,24 @@ class SocialGraphGUI(tk.Tk):
         )
         chk_disk.grid(row=row, column=0, columnspan=3, sticky="w", pady=2)
         row += 1
-        h_disk = ttk.Label(scrollable_frame, text="Saves embeddings & crops to disk to minimize RAM usage.", style="HelpText.TLabel")
+        h_disk = ttk.Label(
+            scrollable_frame,
+            text="Saves embeddings & crops to disk to minimize RAM usage.",
+            style="HelpText.TLabel",
+        )
         h_disk.grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
 
         # Cache dir
-        lbl_cache = ttk.Label(scrollable_frame, text="Cache Directory:", style="FieldLabel.TLabel")
+        lbl_cache = ttk.Label(
+            scrollable_frame, text="Cache Directory:", style="FieldLabel.TLabel"
+        )
         lbl_cache.grid(row=row, column=0, sticky="w", pady=2)
         self.entry_cache_dir = ttk.Entry(scrollable_frame, width=28)
         self.entry_cache_dir.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-        self.btn_browse_cache = ttk.Button(scrollable_frame, text="Browse...", width=9, command=self._browse_cache)
+        self.btn_browse_cache = ttk.Button(
+            scrollable_frame, text="Browse...", width=9, command=self._browse_cache
+        )
         self.btn_browse_cache.grid(row=row, column=2, sticky="e", pady=2)
         row += 1
 
@@ -410,7 +556,9 @@ class SocialGraphGUI(tk.Tk):
         chk_grouped.grid(row=row, column=0, columnspan=3, sticky="w", pady=(8, 2))
         row += 1
         # Separator & Start button inside the parameters panel for direct access
-        ttk.Separator(scrollable_frame, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 12))
+        ttk.Separator(scrollable_frame, orient="horizontal").grid(
+            row=row, column=0, columnspan=3, sticky="ew", pady=(8, 12)
+        )
         row += 1
 
         self.btn_start_param = ttk.Button(
@@ -419,7 +567,9 @@ class SocialGraphGUI(tk.Tk):
             style="Primary.TButton",
             command=self._start_scan,
         )
-        self.btn_start_param.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        self.btn_start_param.grid(
+            row=row, column=0, columnspan=3, sticky="ew", pady=(0, 8)
+        )
         row += 1
 
         scrollable_frame.columnconfigure(1, weight=1)
@@ -435,10 +585,17 @@ class SocialGraphGUI(tk.Tk):
         preview_header = ttk.Frame(preview_card, style="Card.TFrame")
         preview_header.pack(fill="x", pady=(0, 6))
 
-        p_title = ttk.Label(preview_header, text="Live Scanner Preview", style="Section.TLabel")
+        p_title = ttk.Label(
+            preview_header, text="Live Scanner Preview", style="Section.TLabel"
+        )
         p_title.pack(side="left")
 
-        self.lbl_preview_event = ttk.Label(preview_header, text="", font=("Segoe UI", 9, "italic"), foreground="#4a5568")
+        self.lbl_preview_event = ttk.Label(
+            preview_header,
+            text="",
+            font=("Segoe UI", 9, "italic"),
+            foreground="#4a5568",
+        )
         self.lbl_preview_event.pack(side="right")
 
         # Current scanning image name label
@@ -451,7 +608,9 @@ class SocialGraphGUI(tk.Tk):
         self.lbl_current_image.pack(anchor="w", pady=(0, 4))
 
         # Canvas for the preview image
-        self.preview_canvas_frame = tk.Frame(preview_card, bg="#1a202c", relief="ridge", bd=1)
+        self.preview_canvas_frame = tk.Frame(
+            preview_card, bg="#1a202c", relief="ridge", bd=1
+        )
         self.preview_canvas_frame.pack(fill="both", expand=True, pady=4)
 
         self.preview_image_label = tk.Label(
@@ -468,7 +627,9 @@ class SocialGraphGUI(tk.Tk):
         preview_info_frame = ttk.Frame(preview_card, style="Card.TFrame")
         preview_info_frame.pack(fill="x", pady=(6, 0))
 
-        self.lbl_image_meta = ttk.Label(preview_info_frame, text="Resolution: -", style="FieldLabel.TLabel")
+        self.lbl_image_meta = ttk.Label(
+            preview_info_frame, text="Resolution: -", style="FieldLabel.TLabel"
+        )
         self.lbl_image_meta.pack(side="left")
 
         self.lbl_face_badge = ttk.Label(
@@ -489,7 +650,9 @@ class SocialGraphGUI(tk.Tk):
         l_title = ttk.Label(logs_header, text="Activity Log", style="Section.TLabel")
         l_title.pack(side="left")
 
-        btn_clear_log = ttk.Button(logs_header, text="Clear", width=7, command=self._clear_log)
+        btn_clear_log = ttk.Button(
+            logs_header, text="Clear", width=7, command=self._clear_log
+        )
         btn_clear_log.pack(side="right")
 
         self.txt_logs = scrolledtext.ScrolledText(
@@ -512,17 +675,19 @@ class SocialGraphGUI(tk.Tk):
         outer.pack(fill="both", expand=True)
 
         # ── Section: Select Existing Graph ──────────────────────────────────
-        sec_graph = ttk.Label(outer, text="Select Existing Graph", style="Section.TLabel")
+        sec_graph = ttk.Label(
+            outer, text="Select Existing Graph", style="Section.TLabel"
+        )
         sec_graph.grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
 
-        ttk.Label(outer, text="Graph File (.html/.json/.pkl):", style="FieldLabel.TLabel").grid(
-            row=1, column=0, sticky="w", pady=2
-        )
+        ttk.Label(
+            outer, text="Graph File (.html/.json/.pkl):", style="FieldLabel.TLabel"
+        ).grid(row=1, column=0, sticky="w", pady=2)
         self.entry_mg_graph = ttk.Entry(outer, width=52)
         self.entry_mg_graph.grid(row=1, column=1, sticky="ew", padx=4, pady=2)
-        ttk.Button(outer, text="Browse...", width=9, command=self._mg_browse_graph).grid(
-            row=1, column=2, sticky="e", pady=2
-        )
+        ttk.Button(
+            outer, text="Browse...", width=9, command=self._mg_browse_graph
+        ).grid(row=1, column=2, sticky="e", pady=2)
 
         ttk.Label(
             outer,
@@ -532,11 +697,18 @@ class SocialGraphGUI(tk.Tk):
 
         # Graph info badge
         self.lbl_mg_graph_info = ttk.Label(
-            outer, text="No graph loaded.", font=("Segoe UI", 8, "italic"), foreground="#718096"
+            outer,
+            text="No graph loaded.",
+            font=("Segoe UI", 8, "italic"),
+            foreground="#718096",
         )
-        self.lbl_mg_graph_info.grid(row=3, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        self.lbl_mg_graph_info.grid(
+            row=3, column=0, columnspan=3, sticky="w", pady=(0, 8)
+        )
 
-        ttk.Separator(outer, orient="horizontal").grid(row=4, column=0, columnspan=3, sticky="ew", pady=8)
+        ttk.Separator(outer, orient="horizontal").grid(
+            row=4, column=0, columnspan=3, sticky="ew", pady=8
+        )
 
         # ── Two-column sub-panels ────────────────────────────────────────────
         panels = ttk.Frame(outer)
@@ -547,24 +719,32 @@ class SocialGraphGUI(tk.Tk):
         panels.columnconfigure(1, weight=1)
 
         # Left panel: Add New Images
-        add_card = ttk.LabelFrame(panels, text=" Add New Images (Continuous Creation) ", padding=10)
+        add_card = ttk.LabelFrame(
+            panels, text=" Add New Images (Continuous Creation) ", padding=10
+        )
         add_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         add_card.columnconfigure(1, weight=1)
         self._build_mg_add_panel(add_card)
 
         # Right panel: Prune Graph
-        prune_card = ttk.LabelFrame(panels, text=" Prune Graph (Top Popularity Nodes) ", padding=10)
+        prune_card = ttk.LabelFrame(
+            panels, text=" Prune Graph (Top Popularity Nodes) ", padding=10
+        )
         prune_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         prune_card.columnconfigure(1, weight=1)
         self._build_mg_prune_panel(prune_card)
 
-        ttk.Separator(outer, orient="horizontal").grid(row=6, column=0, columnspan=3, sticky="ew", pady=8)
+        ttk.Separator(outer, orient="horizontal").grid(
+            row=6, column=0, columnspan=3, sticky="ew", pady=8
+        )
 
         # ── Manage tab log ──────────────────────────────────────────────────
         ttk.Label(outer, text="Manage Log", style="Section.TLabel").grid(
             row=7, column=0, columnspan=2, sticky="w"
         )
-        btn_clear_mg = ttk.Button(outer, text="Clear", width=7, command=self._mg_clear_log)
+        btn_clear_mg = ttk.Button(
+            outer, text="Clear", width=7, command=self._mg_clear_log
+        )
         btn_clear_mg.grid(row=7, column=2, sticky="e")
 
         self.txt_mg_logs = scrolledtext.ScrolledText(
@@ -586,7 +766,7 @@ class SocialGraphGUI(tk.Tk):
         ttk.Label(
             parent,
             text="Folder with new images to add to the selected graph.\n"
-                 "Only unprocessed images (not in the previous graph) are scanned.",
+            "Only unprocessed images (not in the previous graph) are scanned.",
             style="HelpText.TLabel",
             wraplength=300,
         ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
@@ -597,9 +777,9 @@ class SocialGraphGUI(tk.Tk):
         )
         self.entry_mg_new_images = ttk.Entry(parent, width=22)
         self.entry_mg_new_images.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-        ttk.Button(parent, text="Browse...", width=8, command=self._mg_browse_new_images).grid(
-            row=row, column=2, sticky="e", pady=2
-        )
+        ttk.Button(
+            parent, text="Browse...", width=8, command=self._mg_browse_new_images
+        ).grid(row=row, column=2, sticky="e", pady=2)
         row += 1
 
         ttk.Label(parent, text="New Profiles Folder:", style="FieldLabel.TLabel").grid(
@@ -607,9 +787,9 @@ class SocialGraphGUI(tk.Tk):
         )
         self.entry_mg_new_profiles = ttk.Entry(parent, width=22)
         self.entry_mg_new_profiles.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-        ttk.Button(parent, text="Browse...", width=8, command=self._mg_browse_new_profiles).grid(
-            row=row, column=2, sticky="e", pady=2
-        )
+        ttk.Button(
+            parent, text="Browse...", width=8, command=self._mg_browse_new_profiles
+        ).grid(row=row, column=2, sticky="e", pady=2)
         row += 1
 
         ttk.Label(parent, text="Output Folder *:", style="FieldLabel.TLabel").grid(
@@ -617,14 +797,17 @@ class SocialGraphGUI(tk.Tk):
         )
         self.entry_mg_add_output = ttk.Entry(parent, width=22)
         self.entry_mg_add_output.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-        ttk.Button(parent, text="Browse...", width=8, command=self._mg_browse_add_output).grid(
-            row=row, column=2, sticky="e", pady=2
-        )
+        ttk.Button(
+            parent, text="Browse...", width=8, command=self._mg_browse_add_output
+        ).grid(row=row, column=2, sticky="e", pady=2)
         row += 1
 
-        ttk.Label(parent, text="Output filename stem (e.g. 'graph_v2' → graph_v2.html/.json/.pkl)", style="HelpText.TLabel", wraplength=300).grid(
-            row=row, column=0, columnspan=3, sticky="w", pady=(0, 4)
-        )
+        ttk.Label(
+            parent,
+            text="Output filename stem (e.g. 'graph_v2' → graph_v2.html/.json/.pkl)",
+            style="HelpText.TLabel",
+            wraplength=300,
+        ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 4))
         row += 1
 
         ttk.Label(parent, text="Output Name:", style="FieldLabel.TLabel").grid(
@@ -632,10 +815,14 @@ class SocialGraphGUI(tk.Tk):
         )
         self.entry_mg_add_name = ttk.Entry(parent, width=22)
         self.entry_mg_add_name.insert(0, "people_graph_updated")
-        self.entry_mg_add_name.grid(row=row, column=1, columnspan=2, sticky="ew", padx=4, pady=2)
+        self.entry_mg_add_name.grid(
+            row=row, column=1, columnspan=2, sticky="ew", padx=4, pady=2
+        )
         row += 1
 
-        ttk.Separator(parent, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=6)
+        ttk.Separator(parent, orient="horizontal").grid(
+            row=row, column=0, columnspan=3, sticky="ew", pady=6
+        )
         row += 1
 
         self.btn_mg_add = ttk.Button(
@@ -646,17 +833,25 @@ class SocialGraphGUI(tk.Tk):
         )
         self.btn_mg_add.grid(row=row, column=0, columnspan=2, sticky="ew", pady=2)
         self.btn_mg_cancel_add = ttk.Button(
-            parent, text="Cancel", style="Danger.TButton", state="disabled",
+            parent,
+            text="Cancel",
+            style="Danger.TButton",
+            state="disabled",
             command=self._mg_cancel_add,
         )
         self.btn_mg_cancel_add.grid(row=row, column=2, sticky="e", padx=(4, 0), pady=2)
         row += 1
 
         self.btn_mg_open_add_result = ttk.Button(
-            parent, text="Open Updated Graph", style="Success.TButton", state="disabled",
+            parent,
+            text="Open Updated Graph",
+            style="Success.TButton",
+            state="disabled",
             command=self._mg_open_add_result,
         )
-        self.btn_mg_open_add_result.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        self.btn_mg_open_add_result.grid(
+            row=row, column=0, columnspan=3, sticky="ew", pady=(4, 0)
+        )
 
     def _build_mg_prune_panel(self, parent):
         """UI widgets for the 'Prune Graph' section of Manage Graph."""
@@ -664,16 +859,18 @@ class SocialGraphGUI(tk.Tk):
         ttk.Label(
             parent,
             text="Keep only the top X most popular people in the graph.\n"
-                 "Nodes are ranked by popularity score (events attended + connections).",
+            "Nodes are ranked by popularity score (events attended + connections).",
             style="HelpText.TLabel",
             wraplength=300,
         ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(0, 6))
         row += 1
 
-        ttk.Label(parent, text="Top X Nodes to Keep *:", style="FieldLabel.TLabel").grid(
-            row=row, column=0, sticky="w", pady=2
+        ttk.Label(
+            parent, text="Top X Nodes to Keep *:", style="FieldLabel.TLabel"
+        ).grid(row=row, column=0, sticky="w", pady=2)
+        self.spin_mg_top_x = ttk.Spinbox(
+            parent, from_=1, to=10000, increment=1, width=10
         )
-        self.spin_mg_top_x = ttk.Spinbox(parent, from_=1, to=10000, increment=1, width=10)
         self.spin_mg_top_x.set("20")
         self.spin_mg_top_x.grid(row=row, column=1, sticky="w", padx=4, pady=2)
         row += 1
@@ -686,14 +883,32 @@ class SocialGraphGUI(tk.Tk):
         ).grid(row=row, column=0, columnspan=3, sticky="w", pady=2)
         row += 1
 
+        self.var_mg_quality_popularity = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            parent,
+            text="Add image quality",
+            variable=self.var_mg_quality_popularity,
+        ).grid(row=row, column=0, sticky="w", pady=2)
+        ttk.Label(parent, text="Multiplier:", style="FieldLabel.TLabel").grid(
+            row=row, column=1, sticky="e", padx=(0, 4), pady=2
+        )
+        self.spin_mg_quality_multiplier = ttk.Spinbox(
+            parent, from_=0, to=100, increment=0.1, format="%.1f", width=7
+        )
+        self.spin_mg_quality_multiplier.set("1.0")
+        self.spin_mg_quality_multiplier.grid(
+            row=row, column=2, sticky="w", padx=4, pady=2
+        )
+        row += 1
+
         ttk.Label(parent, text="Output Folder *:", style="FieldLabel.TLabel").grid(
             row=row, column=0, sticky="w", pady=2
         )
         self.entry_mg_prune_output = ttk.Entry(parent, width=22)
         self.entry_mg_prune_output.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
-        ttk.Button(parent, text="Browse...", width=8, command=self._mg_browse_prune_output).grid(
-            row=row, column=2, sticky="e", pady=2
-        )
+        ttk.Button(
+            parent, text="Browse...", width=8, command=self._mg_browse_prune_output
+        ).grid(row=row, column=2, sticky="e", pady=2)
         row += 1
 
         ttk.Label(parent, text="Output Name:", style="FieldLabel.TLabel").grid(
@@ -701,10 +916,14 @@ class SocialGraphGUI(tk.Tk):
         )
         self.entry_mg_prune_name = ttk.Entry(parent, width=22)
         self.entry_mg_prune_name.insert(0, "people_graph_pruned")
-        self.entry_mg_prune_name.grid(row=row, column=1, columnspan=2, sticky="ew", padx=4, pady=2)
+        self.entry_mg_prune_name.grid(
+            row=row, column=1, columnspan=2, sticky="ew", padx=4, pady=2
+        )
         row += 1
 
-        ttk.Separator(parent, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=6)
+        ttk.Separator(parent, orient="horizontal").grid(
+            row=row, column=0, columnspan=3, sticky="ew", pady=6
+        )
         row += 1
 
         self.btn_mg_prune = ttk.Button(
@@ -717,10 +936,15 @@ class SocialGraphGUI(tk.Tk):
         row += 1
 
         self.btn_mg_open_prune_result = ttk.Button(
-            parent, text="Open Pruned Graph", style="Success.TButton", state="disabled",
+            parent,
+            text="Open Pruned Graph",
+            style="Success.TButton",
+            state="disabled",
             command=self._mg_open_prune_result,
         )
-        self.btn_mg_open_prune_result.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        self.btn_mg_open_prune_result.grid(
+            row=row, column=0, columnspan=3, sticky="ew", pady=(4, 0)
+        )
 
     # ── Manage Graph: state ───────────────────────────────────────────────────
 
@@ -749,9 +973,14 @@ class SocialGraphGUI(tk.Tk):
     def _mg_refresh_graph_info(self, path: str):
         try:
             from utilities.graph_storage import get_graph_summary
+
             info = get_graph_summary(path)
             if info.get("valid"):
-                bundle_note = "[Bundle Available]" if info.get("has_bundle") else "[No Bundle (Pruning only)]"
+                bundle_note = (
+                    "[Bundle Available]"
+                    if info.get("has_bundle")
+                    else "[No Bundle (Pruning only)]"
+                )
                 txt = (
                     f"Nodes: {info['nodes']}  |  Edges: {info['edges']}  |  "
                     f"Images: {info['images']}  |  Faces: {info['faces']}  |  {bundle_note}"
@@ -769,7 +998,9 @@ class SocialGraphGUI(tk.Tk):
             self.entry_mg_new_images.insert(0, path)
 
     def _mg_browse_new_profiles(self):
-        path = filedialog.askdirectory(title="Select Folder with New Profile Photos (Optional)")
+        path = filedialog.askdirectory(
+            title="Select Folder with New Profile Photos (Optional)"
+        )
         if path:
             self.entry_mg_new_profiles.delete(0, tk.END)
             self.entry_mg_new_profiles.insert(0, path)
@@ -790,6 +1021,7 @@ class SocialGraphGUI(tk.Tk):
 
     def _mg_run_add(self):
         from pathlib import Path
+
         graph_src = self.entry_mg_graph.get().strip()
         new_imgs = self.entry_mg_new_images.get().strip()
         new_profs = self.entry_mg_new_profiles.get().strip() or None
@@ -797,13 +1029,21 @@ class SocialGraphGUI(tk.Tk):
         out_name = self.entry_mg_add_name.get().strip() or "people_graph_updated"
 
         if not graph_src:
-            messagebox.showerror("Validation Error", "Please select an existing graph file.", parent=self)
+            messagebox.showerror(
+                "Validation Error", "Please select an existing graph file.", parent=self
+            )
             return
         if not new_imgs or not Path(new_imgs).is_dir():
-            messagebox.showerror("Validation Error", "Please select a valid folder with new images.", parent=self)
+            messagebox.showerror(
+                "Validation Error",
+                "Please select a valid folder with new images.",
+                parent=self,
+            )
             return
         if not out_folder:
-            messagebox.showerror("Validation Error", "Please select an output folder.", parent=self)
+            messagebox.showerror(
+                "Validation Error", "Please select an output folder.", parent=self
+            )
             return
 
         out_dir = Path(out_folder)
@@ -817,11 +1057,14 @@ class SocialGraphGUI(tk.Tk):
         self.mg_add_result_html: str | None = None
         self.manage_cancel_event.clear()
 
-        self._mg_log(f"Starting update: adding images from '{new_imgs}' to graph '{Path(graph_src).name}'...")
+        self._mg_log(
+            f"Starting update: adding images from '{new_imgs}' to graph '{Path(graph_src).name}'..."
+        )
 
         def run_add():
             try:
                 from utilities.continuous_graph import update_graph_with_images
+
                 html_out, json_out, data_out = update_graph_with_images(
                     graph_source=graph_src,
                     new_images_dir=new_imgs,
@@ -831,7 +1074,9 @@ class SocialGraphGUI(tk.Tk):
                     output_data=out_data,
                     on_log=lambda m: self.ui_queue.put(("mg_log", m)),
                     on_status=lambda s: self.ui_queue.put(("mg_status", s)),
-                    on_progress=lambda c, t, m: self.ui_queue.put(("progress", (c, t, m))),
+                    on_progress=lambda c, t, m: self.ui_queue.put(
+                        ("progress", (c, t, m))
+                    ),
                     is_cancelled=lambda: self.manage_cancel_event.is_set(),
                 )
                 self.ui_queue.put(("mg_add_done", str(html_out)))
@@ -853,22 +1098,42 @@ class SocialGraphGUI(tk.Tk):
         if target and os.path.exists(target):
             webbrowser.open(Path(target).resolve().as_uri())
         else:
-            messagebox.showwarning("File Not Found", "Updated HTML graph file not found.", parent=self)
+            messagebox.showwarning(
+                "File Not Found", "Updated HTML graph file not found.", parent=self
+            )
 
     # ── Prune action ──────────────────────────────────────────────────────────
 
     def _mg_run_prune(self):
         from pathlib import Path
+
         graph_src = self.entry_mg_graph.get().strip()
         out_folder = self.entry_mg_prune_output.get().strip()
         out_name = self.entry_mg_prune_name.get().strip() or "people_graph_pruned"
         remove_iso = self.var_mg_remove_isolated.get()
+        try:
+            quality_multiplier = (
+                float(self.spin_mg_quality_multiplier.get())
+                if self.var_mg_quality_popularity.get()
+                else 0.0
+            )
+            if quality_multiplier < 0:
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror(
+                "Validation Error", "Image quality multiplier must be non-negative.", parent=self
+            )
+            return
 
         if not graph_src:
-            messagebox.showerror("Validation Error", "Please select an existing graph file.", parent=self)
+            messagebox.showerror(
+                "Validation Error", "Please select an existing graph file.", parent=self
+            )
             return
         if not out_folder:
-            messagebox.showerror("Validation Error", "Please select an output folder.", parent=self)
+            messagebox.showerror(
+                "Validation Error", "Please select an output folder.", parent=self
+            )
             return
 
         try:
@@ -876,7 +1141,9 @@ class SocialGraphGUI(tk.Tk):
             if top_x < 1:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror("Validation Error", "Top X must be a positive integer.", parent=self)
+            messagebox.showerror(
+                "Validation Error", "Top X must be a positive integer.", parent=self
+            )
             return
 
         out_dir = Path(out_folder)
@@ -892,6 +1159,7 @@ class SocialGraphGUI(tk.Tk):
         def run_prune():
             try:
                 from utilities.graph_pruning import prune_graph_to_top_popularity
+
                 pruned, html_p, json_p, data_p = prune_graph_to_top_popularity(
                     source=graph_src,
                     top_x=top_x,
@@ -899,6 +1167,7 @@ class SocialGraphGUI(tk.Tk):
                     output_json=out_json,
                     output_data=out_data_path,
                     remove_isolated=remove_iso,
+                    image_quality_multiplier=quality_multiplier,
                     on_log=lambda m: self.ui_queue.put(("mg_log", m)),
                     on_status=lambda s: self.ui_queue.put(("mg_status", s)),
                 )
@@ -913,7 +1182,9 @@ class SocialGraphGUI(tk.Tk):
         if target and os.path.exists(target):
             webbrowser.open(Path(target).resolve().as_uri())
         else:
-            messagebox.showwarning("File Not Found", "Pruned HTML graph file not found.", parent=self)
+            messagebox.showwarning(
+                "File Not Found", "Pruned HTML graph file not found.", parent=self
+            )
 
     # ── Shared bottom bar ─────────────────────────────────────────────────────
 
@@ -928,10 +1199,14 @@ class SocialGraphGUI(tk.Tk):
         self.lbl_status = ttk.Label(status_row, text="Ready", style="Status.TLabel")
         self.lbl_status.pack(side="left")
 
-        self.lbl_progress_percent = ttk.Label(status_row, text="0%", font=("Segoe UI", 9), foreground="#4a5568")
+        self.lbl_progress_percent = ttk.Label(
+            status_row, text="0%", font=("Segoe UI", 9), foreground="#4a5568"
+        )
         self.lbl_progress_percent.pack(side="right")
 
-        self.progress_bar = ttk.Progressbar(bottom_frame, orient="horizontal", mode="determinate")
+        self.progress_bar = ttk.Progressbar(
+            bottom_frame, orient="horizontal", mode="determinate"
+        )
         self.progress_bar.pack(fill="x", pady=(0, 8))
 
         # Controls & action buttons row
@@ -1047,7 +1322,9 @@ class SocialGraphGUI(tk.Tk):
             self.entry_json.insert(0, path)
 
     def _browse_cache(self):
-        path = filedialog.askdirectory(title="Select Cache Folder for Intermediate Files")
+        path = filedialog.askdirectory(
+            title="Select Cache Folder for Intermediate Files"
+        )
         if path:
             self.entry_cache_dir.delete(0, tk.END)
             self.entry_cache_dir.insert(0, path)
@@ -1068,7 +1345,9 @@ class SocialGraphGUI(tk.Tk):
 
         images_path = Path(images_val)
         if not images_path.is_dir():
-            messagebox.showerror("Validation Error", f"Images folder does not exist:\n{images_path}")
+            messagebox.showerror(
+                "Validation Error", f"Images folder does not exist:\n{images_path}"
+            )
             self.entry_images.focus()
             return None
 
@@ -1076,7 +1355,7 @@ class SocialGraphGUI(tk.Tk):
         if not found_imgs:
             messagebox.showerror(
                 "Validation Error",
-                f"No supported images found in '{images_path}'.\nSupported types: {', '.join(IMAGE_EXTENSIONS)}"
+                f"No supported images found in '{images_path}'.\nSupported types: {', '.join(IMAGE_EXTENSIONS)}",
             )
             return None
 
@@ -1084,7 +1363,10 @@ class SocialGraphGUI(tk.Tk):
         if profiles_val:
             profiles_path = Path(profiles_val)
             if not profiles_path.is_dir():
-                messagebox.showerror("Validation Error", f"Profiles folder does not exist:\n{profiles_path}")
+                messagebox.showerror(
+                    "Validation Error",
+                    f"Profiles folder does not exist:\n{profiles_path}",
+                )
                 self.entry_profiles.focus()
                 return None
         else:
@@ -1092,7 +1374,9 @@ class SocialGraphGUI(tk.Tk):
 
         output_val = self.entry_output.get().strip()
         if not output_val:
-            messagebox.showerror("Validation Error", "Please specify an Output HTML file path.")
+            messagebox.showerror(
+                "Validation Error", "Please specify an Output HTML file path."
+            )
             self.entry_output.focus()
             return None
         if not output_val.lower().endswith(".html"):
@@ -1111,7 +1395,10 @@ class SocialGraphGUI(tk.Tk):
             if eps_val <= 0 or eps_val > 2.0:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror("Validation Error", "DBSCAN eps must be a positive number (typically between 0.05 and 1.5).")
+            messagebox.showerror(
+                "Validation Error",
+                "DBSCAN eps must be a positive number (typically between 0.05 and 1.5).",
+            )
             self.spin_eps.focus()
             return None
 
@@ -1120,7 +1407,9 @@ class SocialGraphGUI(tk.Tk):
             if min_samples_val < 1:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror("Validation Error", "Min Samples must be an integer of 1 or greater.")
+            messagebox.showerror(
+                "Validation Error", "Min Samples must be an integer of 1 or greater."
+            )
             self.spin_min_samples.focus()
             return None
 
@@ -1129,7 +1418,10 @@ class SocialGraphGUI(tk.Tk):
             if profile_dist_val < 0 or profile_dist_val > 2.0:
                 raise ValueError()
         except ValueError:
-            messagebox.showerror("Validation Error", "Profile Distance must be a positive number between 0.0 and 2.0.")
+            messagebox.showerror(
+                "Validation Error",
+                "Profile Distance must be a positive number between 0.0 and 2.0.",
+            )
             self.spin_profile_dist.focus()
             return None
 
@@ -1150,7 +1442,11 @@ class SocialGraphGUI(tk.Tk):
             except ValueError:
                 ctx_id_val = -1
 
-        cache_dir_val = self.entry_cache_dir.get().strip() if self.var_disk_storage.get() or self.var_grouped_faces.get() else None
+        cache_dir_val = (
+            self.entry_cache_dir.get().strip()
+            if self.var_disk_storage.get() or self.var_grouped_faces.get()
+            else None
+        )
 
         return {
             "images": images_val,
@@ -1241,28 +1537,38 @@ class SocialGraphGUI(tk.Tk):
                     if data and os.path.exists(data):
                         self.btn_mg_open_add_result.configure(state="normal")
                     self._mg_log("[Success] Graph updated successfully!")
-                    messagebox.showinfo("Success", f"Graph updated!\n\nHTML: {data}", parent=self)
+                    messagebox.showinfo(
+                        "Success", f"Graph updated!\n\nHTML: {data}", parent=self
+                    )
                 elif msg_type == "mg_add_cancelled":
                     self.btn_mg_add.configure(state="normal")
                     self.btn_mg_cancel_add.configure(state="disabled")
                     self._mg_log("[Cancelled] Update cancelled.")
-                    messagebox.showwarning("Cancelled", "Graph update was cancelled.", parent=self)
+                    messagebox.showwarning(
+                        "Cancelled", "Graph update was cancelled.", parent=self
+                    )
                 elif msg_type == "mg_add_error":
                     self.btn_mg_add.configure(state="normal")
                     self.btn_mg_cancel_add.configure(state="disabled")
                     self._mg_log(f"[Error] {data}")
-                    messagebox.showerror("Error", f"Failed to update graph:\n\n{data}", parent=self)
+                    messagebox.showerror(
+                        "Error", f"Failed to update graph:\n\n{data}", parent=self
+                    )
                 elif msg_type == "mg_prune_done":
                     self.mg_prune_result_html = data if data else None
                     self.btn_mg_prune.configure(state="normal")
                     if data and os.path.exists(data):
                         self.btn_mg_open_prune_result.configure(state="normal")
                     self._mg_log("[Success] Graph pruned successfully!")
-                    messagebox.showinfo("Success", f"Graph pruned!\n\nHTML: {data}", parent=self)
+                    messagebox.showinfo(
+                        "Success", f"Graph pruned!\n\nHTML: {data}", parent=self
+                    )
                 elif msg_type == "mg_prune_error":
                     self.btn_mg_prune.configure(state="normal")
                     self._mg_log(f"[Error] {data}")
-                    messagebox.showerror("Error", f"Failed to prune graph:\n\n{data}", parent=self)
+                    messagebox.showerror(
+                        "Error", f"Failed to prune graph:\n\n{data}", parent=self
+                    )
         except queue.Empty:
             pass
         finally:
@@ -1294,8 +1600,14 @@ class SocialGraphGUI(tk.Tk):
         rgb_img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         # Draw green bounding boxes for detected faces
-        for (x1, y1, x2, y2) in bboxes:
-            cv2.rectangle(rgb_img, (x1, y1), (x2, y2), (40, 220, 100), max(2, int(max(w, h) / 350)))
+        for x1, y1, x2, y2 in bboxes:
+            cv2.rectangle(
+                rgb_img,
+                (x1, y1),
+                (x2, y2),
+                (40, 220, 100),
+                max(2, int(max(w, h) / 350)),
+            )
 
         # Determine canvas display dimensions
         canvas_w = max(self.preview_canvas_frame.winfo_width(), 360)
@@ -1309,7 +1621,9 @@ class SocialGraphGUI(tk.Tk):
         self.preview_image_ref = photo
         self.preview_image_label.configure(image=photo, text="")
 
-    def _on_work_completed(self, success: bool, cancelled: bool = False, error_msg: str = ""):
+    def _on_work_completed(
+        self, success: bool, cancelled: bool = False, error_msg: str = ""
+    ):
         self.btn_start.configure(state="normal")
         if hasattr(self, "btn_start_param"):
             self.btn_start_param.configure(state="normal")
@@ -1327,14 +1641,18 @@ class SocialGraphGUI(tk.Tk):
         elif cancelled:
             messagebox.showwarning("Cancelled", "Graph generation process was stopped.")
         else:
-            messagebox.showerror("Error", f"Failed to complete graph generation:\n\n{error_msg}")
+            messagebox.showerror(
+                "Error", f"Failed to complete graph generation:\n\n{error_msg}"
+            )
 
     def _open_in_browser(self):
         target = self.last_output_path or self.entry_output.get().strip()
         if target and os.path.exists(target):
             webbrowser.open(Path(target).resolve().as_uri())
         else:
-            messagebox.showwarning("File Not Found", "Output HTML file does not exist yet.")
+            messagebox.showwarning(
+                "File Not Found", "Output HTML file does not exist yet."
+            )
 
     def _open_json_file(self):
         target = self.last_json_path or self.entry_json.get().strip()
@@ -1344,7 +1662,9 @@ class SocialGraphGUI(tk.Tk):
             else:
                 webbrowser.open(Path(target).resolve().as_uri())
         else:
-            messagebox.showwarning("File Not Found", f"JSON file does not exist yet:\n{target}")
+            messagebox.showwarning(
+                "File Not Found", f"JSON file does not exist yet:\n{target}"
+            )
 
     def _open_output_folder(self):
         out = self.last_output_path or self.entry_output.get().strip()
@@ -1355,7 +1675,9 @@ class SocialGraphGUI(tk.Tk):
             else:
                 webbrowser.open(folder.as_uri())
         else:
-            messagebox.showwarning("Folder Not Found", f"Folder does not exist:\n{folder}")
+            messagebox.showwarning(
+                "Folder Not Found", f"Folder does not exist:\n{folder}"
+            )
 
 
 def main():

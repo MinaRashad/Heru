@@ -13,3 +13,6 @@ __pycache__/
 
 # Virtual environment
 .venv/
+
+*.html
+*.json

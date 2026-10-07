@@ -50,6 +50,7 @@ from insightface.app import FaceAnalysis
 from sklearn.cluster import DBSCAN
 from pyvis.network import Network
 from tqdm import tqdm
+from image_processing.image_utilities import face_crop_quality
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
@@ -291,26 +292,47 @@ def prepare_node_crops(
     cluster_names: dict[int, str],
     disk_storage: bool = False,
 ) -> dict[str, str]:
-    """Extract representative face crop Base64 data URIs for each cluster."""
+    """Extract the highest-quality representative face crop for each cluster."""
+
     crops: dict[str, str] = {}
+    best_scores: dict[str, float] = {}
+
     for record, label in zip(face_records, labels):
         if label < 0:
             continue
+
         name = cluster_names[int(label)]
-        if name in crops:
-            continue
 
         if disk_storage:
             crop_path = record.get("crop_path")
-            if crop_path and crop_path.is_file():
+            if not crop_path or not crop_path.is_file():
+                continue
+
+            crop = cv2.imread(str(crop_path))
+            if crop is None:
+                continue
+
+            score = face_crop_quality(crop)
+
+            if score > best_scores.get(name, -1):
                 data_uri = encode_crop_file(crop_path)
                 if data_uri:
                     crops[name] = data_uri
+                    best_scores[name] = score
+
         else:
-            if record.get("crop") is not None:
-                data_uri = encode_crop(record["crop"])
+            crop = record.get("crop")
+            if crop is None:
+                continue
+
+            score = face_crop_quality(crop)
+
+            if score > best_scores.get(name, -1):
+                data_uri = encode_crop(crop)
                 if data_uri:
                     crops[name] = data_uri
+                    best_scores[name] = score
+
     return crops
 
 

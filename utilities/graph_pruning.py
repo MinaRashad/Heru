@@ -8,11 +8,14 @@ and export the pruned network to HTML, JSON, and serialized graph bundles.
 from __future__ import annotations
 
 import argparse
+import base64
 from pathlib import Path
 import sys
 from typing import Callable
 
+import cv2
 import networkx as nx
+import numpy as np
 
 # Add project root to sys.path if not present
 project_root = Path(__file__).resolve().parent.parent
@@ -26,6 +29,7 @@ from utilities.graph_storage import (
     load_graph_from_json,
     save_graph_data,
 )
+from image_processing.image_utilities import face_crop_quality
 
 
 def prune_graph_to_top_popularity(
@@ -37,6 +41,7 @@ def prune_graph_to_top_popularity(
     output_json: Path | str | None = None,
     output_data: Path | str | None = None,
     remove_isolated: bool = False,
+    image_quality_multiplier: float = 0.0,
     on_log: Callable[[str], None] | None = None,
     on_status: Callable[[str], None] | None = None,
 ) -> tuple[nx.Graph, Path | None, Path | None, Path | None]:
@@ -61,6 +66,9 @@ def prune_graph_to_top_popularity(
         Destination path for pruned .graph_data.pkl bundle.
     remove_isolated : bool, default False
         Whether to remove nodes that become isolated after pruning edges to omitted nodes.
+    image_quality_multiplier : float, default 0.0
+        Multiplier applied to representative face crop quality normalized to 0–100
+        before adding it to existing popularity. A value of 0 disables recalculation.
     on_log : Callable, optional
         Callback for logging messages.
     on_status : Callable, optional
@@ -132,6 +140,41 @@ def prune_graph_to_top_popularity(
                 graph.nodes[n]["popularity"] = (len(person_events) * 50) + graph.degree[n]
             else:
                 graph.nodes[n]["popularity"] = graph.degree[n]
+
+    if image_quality_multiplier != 0:
+        qualities: dict[str, float] = {}
+        for node, image_uri in node_crops.items():
+            if node not in graph or not isinstance(image_uri, str):
+                continue
+            try:
+                encoded = image_uri.split(",", 1)[1] if "," in image_uri else image_uri
+                image_bytes = base64.b64decode(encoded)
+                image_array = np.frombuffer(image_bytes, dtype=np.uint8)
+                crop = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+                if crop is not None:
+                    qualities[node] = float(face_crop_quality(crop))
+            except (ValueError, cv2.error):
+                continue
+
+        if qualities:
+            min_quality = min(qualities.values())
+            max_quality = max(qualities.values())
+            quality_range = max_quality - min_quality
+            for node in graph.nodes:
+                quality_score = (
+                    100.0 * (qualities[node] - min_quality) / quality_range
+                    if node in qualities and quality_range > 0
+                    else 0.0
+                )
+                weighted_quality_score = image_quality_multiplier * quality_score
+                graph.nodes[node]["popularity"] += weighted_quality_score
+                graph.nodes[node]["image_quality_score"] = weighted_quality_score
+            log(
+                f"Added normalized quality scores for {len(qualities)} representative images "
+                f"(quality range: {min_quality:.2f}–{max_quality:.2f}; normalized to 0–100)."
+            )
+        else:
+            log("No readable representative images found; using existing popularity scores.")
 
     total_nodes = len(graph.nodes)
     total_edges = len(graph.edges)

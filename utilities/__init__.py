@@ -28,5 +28,5 @@ __all__ = [
     "serialize_crop",
     "prune_graph_to_top_degree",
     "prune_graph_to_top_popularity",
-    "update_graph_with_images",
-]
+    "update_graph_with_images"
+    ]
