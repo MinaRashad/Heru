@@ -121,7 +121,7 @@ def extract_image_faces(
     on_image: Callable[[Path, np.ndarray | None, list[tuple[int, int, int, int]], int, str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[list[np.ndarray], list[dict], dict[Path, int]]:
-    """Scan images and detect faces, extracting normalized embeddings and crops."""
+    """Scan images and detect faces, extracting normalized embeddings and face crops."""
     vectors: list[np.ndarray] = []
     face_records: list[dict] = []
     image_face_counts: dict[Path, int] = {}
@@ -169,19 +169,32 @@ def extract_image_faces(
             embedding_norm = embedding / norm
             has_crop = (x2 > x1 and y2 > y1)
 
+            crop = image[y1:y2, x1:x2].copy() if has_crop else None
+            quality = face_crop_quality(crop) if crop is not None else 0.0
+
             if disk_storage:
                 assert embeddings_file is not None and crops_dir is not None
                 embeddings_file.write(embedding_norm.tobytes())
                 crop_path = None
-                if has_crop:
-                    crop = image[y1:y2, x1:x2]
+                if has_crop and crop is not None:
                     crop_path = crops_dir / f"face_{face_idx:07d}.jpg"
                     cv2.imwrite(str(crop_path), crop)
-                face_records.append({"event": event, "image": path, "crop_path": crop_path})
+                face_records.append({
+                    "event": event,
+                    "image": path,
+                    "crop_path": crop_path,
+                    "bbox": (x1, y1, x2, y2),
+                    "quality": quality,
+                })
             else:
                 vectors.append(embedding_norm)
-                crop = image[y1:y2, x1:x2].copy() if has_crop else None
-                face_records.append({"event": event, "image": path, "crop": crop})
+                face_records.append({
+                    "event": event,
+                    "image": path,
+                    "crop": crop,
+                    "bbox": (x1, y1, x2, y2),
+                    "quality": quality,
+                })
 
             face_idx += 1
 
@@ -365,54 +378,98 @@ def export_grouped_faces(
 
 
 def construct_graph(
-    face_records: list[dict],
-    labels: np.ndarray,
-    cluster_names: dict[int, str],
-    image_face_counts: dict[Path, int],
+    face_records: list[dict] | None = None,
+    labels: np.ndarray | None = None,
+    cluster_names: dict[int, str] | None = None,
+    image_face_counts: dict[Path | str, int] | None = None,
     remove_isolated: bool = True,
+    *,
+    image_records: list[dict[str, Any]] | None = None,
+    small_group_weight: float = 5.0,
+    small_group_max_faces: int = 3,
+    large_group_weight: float = 2.0,
+    event_weight: float = 1.0,
+    event_popularity_multiplier: float = 50.0,
+    degree_popularity_multiplier: float = 1.0,
     on_log: Callable[[str], None] | None = None,
 ) -> nx.Graph:
-    """Build the social network graph with co-occurrence weighting and optional isolate removal."""
+    """Build the social network graph with co-occurrence weighting and optional isolate removal.
+
+    Can be constructed directly from standalone `image_records` (Part 2) or from raw face records.
+    Collects co-occurrence photo evidence on each edge.
+    """
     def log(msg: str):
         if on_log:
             on_log(msg)
         else:
             print(msg)
 
-    log(f"Building connections for {len(cluster_names)} identified people...")
-    event_people: dict[str, set[str]] = defaultdict(set)
-    image_people: dict[Path, set[str]] = defaultdict(set)
-    for record, label in zip(face_records, labels):
-        if label < 0:
-            continue
-        person = cluster_names[int(label)]
-        event_people[record["event"]].add(person)
-        image_people[record["image"]].add(person)
+    # Ensure we have image_records
+    if image_records is None:
+        from utilities.graph_storage import build_image_records
+        image_records = build_image_records(
+            event_images=[],
+            face_records=face_records or [],
+            labels=labels if labels is not None else np.array([]),
+            cluster_names=cluster_names or {},
+            image_face_counts=image_face_counts or {},
+        )
 
+    # Identify all candidate nodes
+    all_people: set[str] = set()
+    if cluster_names:
+        all_people.update(cluster_names.values())
+    for row in image_records:
+        for p in row.get("people", []):
+            if p:
+                all_people.add(p)
+
+    log(f"Building connections for {len(all_people)} identified people...")
     graph = nx.Graph()
-    graph.add_nodes_from(sorted(set(cluster_names.values())))
+    graph.add_nodes_from(sorted(all_people))
 
-    # Add stronger links for appearing together in a photo; larger group photos
-    # get less weight (2 points) vs small group photos (5 points).
-    for path, people in image_people.items():
-        points = 5 if image_face_counts[path] <= 3 else 2
-        members = sorted(people)
-        for i, person_a in enumerate(members):
-            for person_b in members[i + 1:]:
-                graph.add_edge(person_a, person_b, weight=graph.get_edge_data(person_a, person_b, {}).get("weight", 0) + points)
+    # Add photo co-occurrence edges with configurable formula weights & evidence tracking
+    event_people: dict[str, set[str]] = defaultdict(set)
+    person_events: dict[str, set[str]] = defaultdict(set)
 
-    # Sharing an event adds 1 point, but only when there are multiple distinct events.
-    # With a single event (flat folder), every person trivially shares it, which would
-    # connect all people to each other and add noise rather than social signal.
+    for row in image_records:
+        ev = row.get("event", "")
+        row_people = sorted(list(set(p for p in row.get("people", []) if p)))
+        face_count = row.get("face_count", len(row_people))
+        img_id = row.get("image_id") or Path(row.get("image_path", "image")).name
+
+        for p in row_people:
+            event_people[ev].add(p)
+            person_events[p].add(ev)
+
+        # Apply co-occurrence formula
+        points = small_group_weight if face_count <= small_group_max_faces else large_group_weight
+        if points > 0 and len(row_people) >= 2:
+            for i, person_a in enumerate(row_people):
+                for person_b in row_people[i + 1:]:
+                    edge_data = graph.get_edge_data(person_a, person_b, {})
+                    w = edge_data.get("weight", 0) + points
+                    ev_list = list(edge_data.get("evidence", []))
+                    if img_id not in ev_list:
+                        ev_list.append(img_id)
+                    graph.add_edge(person_a, person_b, weight=w, evidence=ev_list)
+
+    # Sharing an event adds event_weight points, but only when there are multiple distinct events.
     multiple_events = len(event_people) > 1
-    if multiple_events:
-        for people in event_people.values():
+    if multiple_events and event_weight > 0:
+        for ev, people in event_people.items():
             members = sorted(people)
             for i, person_a in enumerate(members):
                 for person_b in members[i + 1:]:
-                    graph.add_edge(person_a, person_b, weight=graph.get_edge_data(person_a, person_b, {}).get("weight", 0) + 1)
+                    edge_data = graph.get_edge_data(person_a, person_b, {})
+                    w = edge_data.get("weight", 0) + event_weight
+                    ev_events = list(edge_data.get("evidence_events", []))
+                    if ev not in ev_events:
+                        ev_events.append(ev)
+                    graph.add_edge(person_a, person_b, weight=w, evidence_events=ev_events)
     else:
-        log("Single event detected (flat folder): skipping event co-occurrence edges to avoid connecting all people.")
+        if not multiple_events:
+            log("Single event detected (flat folder): skipping event co-occurrence edges to avoid connecting all people.")
 
     # Remove nodes without edges (isolated nodes)
     if remove_isolated:
@@ -421,20 +478,13 @@ def construct_graph(
             graph.remove_nodes_from(isolated)
             log(f"Removed {len(isolated)} isolated person/node(s) with no connections (kept {len(graph.nodes)} connected nodes).")
 
-    # Calculate popularity score for each person:
-    # 50 points for each distinct event the person appears in (only meaningful when
-    # multiple events exist), plus in-degree (number of connections).
-    person_events: dict[str, set[str]] = defaultdict(set)
-    for event, people in event_people.items():
-        for person in people:
-            person_events[person].add(event)
-
+    # Calculate popularity score for each person with customizable multipliers
     for person in graph.nodes:
         num_events = len(person_events.get(person, set())) if multiple_events else 0
         deg = graph.degree[person]
-        popularity = (num_events * 50) + deg
+        popularity = (num_events * event_popularity_multiplier) + (deg * degree_popularity_multiplier)
         graph.nodes[person]["event_count"] = num_events
-        graph.nodes[person]["popularity"] = popularity
+        graph.nodes[person]["popularity"] = round(float(popularity), 2)
 
     # Assign deterministic positions so the visual graph remains stable
     if len(graph.nodes) > 0:
@@ -502,13 +552,20 @@ def export_graph_json(
     edges_data = []
     for u, v, data in graph.edges(data=True):
         weight = data.get("weight", 1)
-        edges_data.append({
+        evidence = data.get("evidence", [])
+        edge_dict = {
             "source": u,
             "target": v,
             "weight": weight,
             "value": round(weight / max_weight, 4),
             "color": weight_to_color(weight, min_weight, max_weight),
-        })
+        }
+        if evidence:
+            edge_dict["evidence"] = evidence
+            edge_dict["evidence_count"] = len(evidence)
+        if "evidence_events" in data and data["evidence_events"]:
+            edge_dict["evidence_events"] = data["evidence_events"]
+        edges_data.append(edge_dict)
 
     graph_payload = {
         "metadata": {
@@ -563,7 +620,14 @@ def export_graph_html(
     for person_a, person_b, data in graph.edges(data=True):
         weight = data["weight"]
         edge_color = weight_to_color(weight, min_weight, max_weight)
-        net.add_edge(person_a, person_b, color=edge_color, width=2, title=f"Score: {weight}")
+        evidence = data.get("evidence", [])
+        title_lines = [f"Score: {weight}"]
+        if evidence:
+            ev_uniq = list(dict.fromkeys(evidence))
+            sample = ", ".join(ev_uniq[:4])
+            more = f" (+{len(ev_uniq) - 4} more)" if len(ev_uniq) > 4 else ""
+            title_lines.append(f"Evidence ({len(ev_uniq)} photo(s)): {sample}{more}")
+        net.add_edge(person_a, person_b, color=edge_color, width=2, title="\n".join(title_lines))
 
     net.toggle_physics(False)
     net.write_html(str(output_path), open_browser=False)
@@ -588,6 +652,13 @@ def build_graph(
     profile_distance: float = 0.55,
     model: str = "buffalo_l",
     ctx_id: int = -1,
+    small_group_weight: float = 5.0,
+    small_group_max_faces: int = 3,
+    large_group_weight: float = 2.0,
+    event_weight: float = 1.0,
+    event_pop_multiplier: float = 50.0,
+    degree_pop_multiplier: float = 1.0,
+    rebuild: Path | str | None = None,
     on_log: Callable[[str], None] | None = None,
     on_status: Callable[[str], None] | None = None,
     on_progress: Callable[[int, int, str], None] | None = None,
@@ -615,6 +686,7 @@ def build_graph(
 
     # Resolve arguments
     if args is not None:
+        rebuild_val = getattr(args, "rebuild", None)
         images_val = args.images
         profiles_val = args.profiles
         output_val = args.output
@@ -630,7 +702,14 @@ def build_graph(
         profile_distance_val = getattr(args, "profile_distance", 0.55)
         model_val = getattr(args, "model", "buffalo_l")
         ctx_id_val = getattr(args, "ctx_id", -1)
+        small_group_weight_val = getattr(args, "small_group_weight", 5.0)
+        small_group_max_faces_val = getattr(args, "small_group_max_faces", 3)
+        large_group_weight_val = getattr(args, "large_group_weight", 2.0)
+        event_weight_val = getattr(args, "event_weight", 1.0)
+        event_pop_multiplier_val = getattr(args, "event_pop_multiplier", 50.0)
+        degree_pop_multiplier_val = getattr(args, "degree_pop_multiplier", 1.0)
     else:
+        rebuild_val = rebuild
         images_val = images
         profiles_val = profiles
         output_val = output or Path("people_graph.html")
@@ -646,9 +725,39 @@ def build_graph(
         profile_distance_val = profile_distance
         model_val = model
         ctx_id_val = ctx_id
-    print(args)
+        small_group_weight_val = small_group_weight
+        small_group_max_faces_val = small_group_max_faces
+        large_group_weight_val = large_group_weight
+        event_weight_val = event_weight
+        event_pop_multiplier_val = event_pop_multiplier
+        degree_pop_multiplier_val = degree_pop_multiplier
+
+    # Handle fast rebuild from existing standalone bundle
+    if rebuild_val:
+        from utilities.continuous_graph import rebuild_graph_from_bundle
+        out_html = Path(output_val).resolve()
+        out_json = Path(json_output_val).resolve() if json_output_val else (out_html.with_suffix(".json") if save_json_val else None)
+        out_bundle = out_html.with_name(f"{out_html.stem}.graph_data.pkl") if save_bundle_val else None
+        _, final_html, final_json, final_bundle = rebuild_graph_from_bundle(
+            rebuild_val,
+            output_html=out_html,
+            output_json=out_json,
+            output_bundle=out_bundle,
+            small_group_weight=small_group_weight_val,
+            small_group_max_faces=small_group_max_faces_val,
+            large_group_weight=large_group_weight_val,
+            event_weight=event_weight_val,
+            event_popularity_multiplier=event_pop_multiplier_val,
+            degree_popularity_multiplier=degree_pop_multiplier_val,
+            remove_isolated=remove_isolated_val,
+            on_log=on_log,
+            on_status=on_status,
+            is_cancelled=is_cancelled,
+        )
+        return final_html or out_html, final_json, final_bundle
+
     if not images_val:
-        raise ValueError("Images folder must be specified.")
+        raise ValueError("Images folder must be specified (or provide --rebuild to rebuild from an existing bundle).")
 
     image_root = Path(images_val).resolve()
     if not image_root.is_dir():
@@ -778,12 +887,24 @@ def build_graph(
         gc.collect()
 
     check_cancel()
-    # Save representative face crops for graph nodes
-    crops = prepare_node_crops(
+    # ── Standalone Output Generation ──────────────────────────────────────────
+    # Part 1: Highest quality images mapped to each person ID
+    from utilities.graph_storage import build_person_crops, build_image_records, save_graph_data
+
+    person_crops, crops = build_person_crops(
         face_records=face_records,
         labels=labels,
         cluster_names=cluster_names,
         disk_storage=disk_storage_val,
+    )
+
+    # Part 2: Each row is an image containing the people IDs as a list
+    image_records = build_image_records(
+        event_images=event_images,
+        face_records=face_records,
+        labels=labels,
+        cluster_names=cluster_names,
+        image_face_counts=image_face_counts,
     )
 
     # Optionally organize clustered faces into per-person directories on disk
@@ -807,6 +928,13 @@ def build_graph(
         cluster_names=cluster_names,
         image_face_counts=image_face_counts,
         remove_isolated=remove_isolated_val,
+        image_records=image_records,
+        small_group_weight=small_group_weight_val,
+        small_group_max_faces=small_group_max_faces_val,
+        large_group_weight=large_group_weight_val,
+        event_weight=event_weight_val,
+        event_popularity_multiplier=event_pop_multiplier_val,
+        degree_popularity_multiplier=degree_pop_multiplier_val,
         on_log=on_log,
     )
 
@@ -824,6 +952,14 @@ def build_graph(
                 "faces_detected": len(face_records),
                 "cluster_count": len(cluster_names),
                 "removed_isolated": remove_isolated_val,
+                "formula": {
+                    "small_group_weight": small_group_weight_val,
+                    "small_group_max_faces": small_group_max_faces_val,
+                    "large_group_weight": large_group_weight_val,
+                    "event_weight": event_weight_val,
+                    "event_popularity_multiplier": event_pop_multiplier_val,
+                    "degree_popularity_multiplier": degree_pop_multiplier_val,
+                },
             },
         )
 
@@ -832,14 +968,14 @@ def build_graph(
     log(f"Saving interactive graph with {len(graph.nodes)} people and {len(graph.edges)} connections to: {output_html}")
     export_graph_html(graph=graph, crops=crops, output_path=output_html)
 
-    # Save serialized graph data bundle for continuous updates
+    # Save serialized graph data bundle for continuous updates and instant formula re-evaluation
     output_bundle: Path | None = None
     if save_bundle_val:
         try:
-            set_status("Saving graph data bundle for future updates...")
-            from utilities.graph_storage import save_graph_data, serialize_crop
+            set_status("Saving standalone graph data bundle for future updates and formula testing...")
             bundle_path = output_html.with_name(f"{output_html.stem}.graph_data.pkl")
             # Compact face record crops to JPEG bytes for storage
+            from utilities.graph_storage import serialize_crop
             compact_records = []
             for rec in face_records:
                 c = dict(rec)
@@ -863,6 +999,8 @@ def build_graph(
                 image_face_counts=image_face_counts,
                 labels=labels,
                 cluster_names=cluster_names,
+                image_records=image_records,
+                person_crops=person_crops,
                 profile_vectors=profile_vectors,
                 profile_names=profile_names,
                 processed_images=processed_images,
@@ -873,15 +1011,25 @@ def build_graph(
                     "model": model_val,
                     "ctx_id": ctx_id_val,
                     "remove_isolated": remove_isolated_val,
+                    "formula": {
+                        "small_group_weight": small_group_weight_val,
+                        "small_group_max_faces": small_group_max_faces_val,
+                        "large_group_weight": large_group_weight_val,
+                        "event_weight": event_weight_val,
+                        "event_popularity_multiplier": event_pop_multiplier_val,
+                        "degree_popularity_multiplier": degree_pop_multiplier_val,
+                    },
                 },
                 metadata={
                     "image_count": len(event_images),
                     "faces_detected": len(face_records),
                     "cluster_count": len(cluster_names),
+                    "image_records_count": len(image_records),
+                    "standalone": True,
                 },
             )
             output_bundle = bundle_path
-            log(f"Graph data bundle saved to: {bundle_path}")
+            log(f"Standalone graph data bundle saved to: {bundle_path}")
         except Exception as _exc:
             log(f"Warning: could not save graph data bundle: {_exc}")
 
@@ -896,7 +1044,7 @@ def build_graph(
 def parse_args() -> argparse.Namespace:
     """Parse command-line options for the image, model, and output settings."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("images", type=Path, help="Folder containing images (flat or grouped in event subfolders)")
+    parser.add_argument("images", type=Path, nargs="?", default=None, help="Folder containing images (flat or grouped in event subfolders)")
     parser.add_argument("-p", "--profiles", type=Path, help="Optional folder of profile photos named after people")
     parser.add_argument("-o", "--output", type=Path, default=Path("people_graph.html"), help="Output HTML graph (default: people_graph.html)")
     parser.add_argument("-j", "--json-output", type=Path, default=None, help="Output JSON graph path (default: <output>.json)")
@@ -928,6 +1076,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile-distance", type=float, default=0.55, help="Maximum cosine distance for profile matching (default: 0.55)")
     parser.add_argument("--model", default="buffalo_l", help="InsightFace model pack (default: buffalo_l)")
     parser.add_argument("--ctx-id", type=int, default=-1, help="Execution provider device id; -1 uses CPU")
+    parser.add_argument("--rebuild", type=Path, default=None, help="Rebuild graph from an existing .graph_data.pkl bundle using the formula defined in code")
     return parser.parse_args()
 
 

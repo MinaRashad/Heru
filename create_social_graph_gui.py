@@ -112,7 +112,7 @@ class SocialGraphGUI(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("Social Eye - Create Social Graph")
+        self.title("Heru - Create Social Graph")
         self.geometry("1100x740")
         self.minsize(900, 580)
 
@@ -195,7 +195,7 @@ class SocialGraphGUI(tk.Tk):
         banner.pack(side="top", fill="x")
 
         title_lbl = ttk.Label(
-            banner, text="Social Eye Graph Generator", style="Header.TLabel"
+            banner, text="Heru Graph Generator", style="Header.TLabel"
         )
         title_lbl.pack(anchor="w")
         subtitle_lbl = ttk.Label(
@@ -710,29 +710,26 @@ class SocialGraphGUI(tk.Tk):
             row=4, column=0, columnspan=3, sticky="ew", pady=8
         )
 
-        # ── Two-column sub-panels ────────────────────────────────────────────
-        panels = ttk.Frame(outer)
-        panels.grid(row=5, column=0, columnspan=3, sticky="nsew")
+        # ── Manage Graph Sub-notebook ────────────────────────────────────────
+        self.mg_notebook = ttk.Notebook(outer)
+        self.mg_notebook.grid(row=5, column=0, columnspan=3, sticky="nsew", pady=(2, 6))
         outer.rowconfigure(5, weight=1)
         outer.columnconfigure(1, weight=1)
-        panels.columnconfigure(0, weight=1)
-        panels.columnconfigure(1, weight=1)
 
-        # Left panel: Add New Images
-        add_card = ttk.LabelFrame(
-            panels, text=" Add New Images (Continuous Creation) ", padding=10
-        )
-        add_card.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        add_card.columnconfigure(1, weight=1)
-        self._build_mg_add_panel(add_card)
+        # Subtab 1: Rebuild Graph
+        rebuild_tab = ttk.Frame(self.mg_notebook, padding=10)
+        self.mg_notebook.add(rebuild_tab, text="  Rebuild Graph  ")
+        self._build_mg_rebuild_panel(rebuild_tab)
 
-        # Right panel: Prune Graph
-        prune_card = ttk.LabelFrame(
-            panels, text=" Prune Graph (Top Popularity Nodes) ", padding=10
-        )
-        prune_card.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-        prune_card.columnconfigure(1, weight=1)
-        self._build_mg_prune_panel(prune_card)
+        # Subtab 2: Add New Images
+        add_tab = ttk.Frame(self.mg_notebook, padding=10)
+        self.mg_notebook.add(add_tab, text="  Add New Images  ")
+        self._build_mg_add_panel(add_tab)
+
+        # Subtab 3: Prune Graph
+        prune_tab = ttk.Frame(self.mg_notebook, padding=10)
+        self.mg_notebook.add(prune_tab, text="  Prune Graph  ")
+        self._build_mg_prune_panel(prune_tab)
 
         ttk.Separator(outer, orient="horizontal").grid(
             row=6, column=0, columnspan=3, sticky="ew", pady=8
@@ -759,6 +756,57 @@ class SocialGraphGUI(tk.Tk):
         )
         self.txt_mg_logs.grid(row=8, column=0, columnspan=3, sticky="nsew", pady=(4, 0))
         outer.rowconfigure(8, weight=1)
+
+    def _build_mg_rebuild_panel(self, parent):
+        """Build a graph from saved image records using the formula in code."""
+        parent.columnconfigure(1, weight=1)
+        ttk.Label(
+            parent,
+            text="Regenerate the graph from saved image records using the current formula in code. "
+            "Face detection and identity clustering are not rerun.",
+            style="HelpText.TLabel",
+            wraplength=420,
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+
+        ttk.Label(parent, text="Output Folder *:", style="FieldLabel.TLabel").grid(
+            row=1, column=0, sticky="w", pady=2
+        )
+        self.entry_mg_rebuild_output = ttk.Entry(parent, width=32)
+        self.entry_mg_rebuild_output.grid(row=1, column=1, sticky="ew", padx=4, pady=2)
+        ttk.Button(
+            parent, text="Browse...", width=8, command=self._mg_browse_rebuild_output
+        ).grid(row=1, column=2, sticky="e", pady=2)
+
+        ttk.Label(parent, text="Output Name:", style="FieldLabel.TLabel").grid(
+            row=2, column=0, sticky="w", pady=2
+        )
+        self.entry_mg_rebuild_name = ttk.Entry(parent, width=22)
+        self.entry_mg_rebuild_name.insert(0, "people_graph_rebuilt")
+        self.entry_mg_rebuild_name.grid(row=2, column=1, columnspan=2, sticky="ew", padx=4, pady=2)
+
+        btn_frame = ttk.Frame(parent)
+        btn_frame.grid(row=3, column=0, columnspan=3, sticky="ew", pady=8)
+        self.btn_mg_rebuild = ttk.Button(
+            btn_frame,
+            text="Rebuild Graph",
+            style="Primary.TButton",
+            command=self._mg_run_rebuild,
+        )
+        self.btn_mg_rebuild.pack(side="left", fill="x", expand=True, padx=(0, 4))
+        self.btn_mg_view_evidence = ttk.Button(
+            btn_frame,
+            text="View Image Records",
+            command=self._mg_view_evidence,
+        )
+        self.btn_mg_view_evidence.pack(side="left", padx=4)
+        self.btn_mg_open_rebuild_result = ttk.Button(
+            btn_frame,
+            text="Open Rebuilt Graph",
+            style="Success.TButton",
+            state="disabled",
+            command=self._mg_open_rebuild_result,
+        )
+        self.btn_mg_open_rebuild_result.pack(side="right", padx=(4, 0))
 
     def _build_mg_add_panel(self, parent):
         """UI widgets for the 'Add New Images' section of Manage Graph."""
@@ -969,6 +1017,13 @@ class SocialGraphGUI(tk.Tk):
             self.entry_mg_graph.delete(0, tk.END)
             self.entry_mg_graph.insert(0, path)
             self._mg_refresh_graph_info(path)
+            parent_dir = str(Path(path).parent)
+            if hasattr(self, 'entry_mg_rebuild_output') and not self.entry_mg_rebuild_output.get():
+                self.entry_mg_rebuild_output.insert(0, parent_dir)
+            if hasattr(self, 'entry_mg_add_output') and not self.entry_mg_add_output.get():
+                self.entry_mg_add_output.insert(0, parent_dir)
+            if hasattr(self, 'entry_mg_prune_output') and not self.entry_mg_prune_output.get():
+                self.entry_mg_prune_output.insert(0, parent_dir)
 
     def _mg_refresh_graph_info(self, path: str):
         try:
@@ -976,11 +1031,12 @@ class SocialGraphGUI(tk.Tk):
 
             info = get_graph_summary(path)
             if info.get("valid"):
-                bundle_note = (
-                    "[Bundle Available]"
-                    if info.get("has_bundle")
-                    else "[No Bundle (Pruning only)]"
-                )
+                if info.get("has_image_records"):
+                    bundle_note = f"[Standalone Records: {info.get('image_records_count', 0)} images]"
+                elif info.get("has_bundle"):
+                    bundle_note = "[Bundle Available]"
+                else:
+                    bundle_note = "[No Bundle (Pruning only)]"
                 txt = (
                     f"Nodes: {info['nodes']}  |  Edges: {info['edges']}  |  "
                     f"Images: {info['images']}  |  Faces: {info['faces']}  |  {bundle_note}"
@@ -1016,6 +1072,136 @@ class SocialGraphGUI(tk.Tk):
         if path:
             self.entry_mg_prune_output.delete(0, tk.END)
             self.entry_mg_prune_output.insert(0, path)
+
+    def _mg_browse_rebuild_output(self):
+        path = filedialog.askdirectory(title="Select Output Folder for Rebuilt Graph")
+        if path:
+            self.entry_mg_rebuild_output.delete(0, tk.END)
+            self.entry_mg_rebuild_output.insert(0, path)
+
+    def _mg_run_rebuild(self):
+        """Regenerate graph files using the graph formula defined in code."""
+        from pathlib import Path
+
+        graph_src = self.entry_mg_graph.get().strip()
+        out_folder = self.entry_mg_rebuild_output.get().strip()
+        out_name = self.entry_mg_rebuild_name.get().strip() or "people_graph_rebuilt"
+
+        if not graph_src:
+            messagebox.showerror(
+                "Validation Error", "Please select an existing graph bundle file (.graph_data.pkl).", parent=self
+            )
+            return
+        if not out_folder:
+            messagebox.showerror(
+                "Validation Error", "Please select an output folder.", parent=self
+            )
+            return
+
+        out_dir = Path(out_folder)
+        out_html = out_dir / f"{out_name}.html"
+        out_json = out_dir / f"{out_name}.json"
+        out_data = out_dir / f"{out_name}.graph_data.pkl"
+
+        self.btn_mg_rebuild.configure(state="disabled")
+        self.btn_mg_open_rebuild_result.configure(state="disabled")
+        self.mg_rebuild_result_html = None
+        self._mg_log(f"Starting graph rebuild from '{Path(graph_src).name}'...")
+
+        def run_rebuild():
+            try:
+                from utilities.continuous_graph import rebuild_graph_from_bundle
+
+                rebuild_graph_from_bundle(
+                    graph_source=graph_src,
+                    output_html=out_html,
+                    output_json=out_json,
+                    output_bundle=out_data,
+                    on_log=lambda m: self.ui_queue.put(("mg_log", m)),
+                    on_status=lambda s: self.ui_queue.put(("mg_status", s)),
+                )
+                self.ui_queue.put(("mg_rebuild_done", str(out_html)))
+            except Exception as e:
+                self.ui_queue.put(("mg_rebuild_error", str(e)))
+
+        self.manage_worker_thread = threading.Thread(target=run_rebuild, daemon=True)
+        self.manage_worker_thread.start()
+
+    def _mg_open_rebuild_result(self):
+        target = getattr(self, "mg_rebuild_result_html", None)
+        if target and os.path.exists(target):
+            webbrowser.open(Path(target).resolve().as_uri())
+        else:
+            messagebox.showwarning(
+                "File Not Found", "Rebuilt HTML graph file not found.", parent=self
+            )
+
+    def _mg_view_evidence(self):
+        """Open an interactive dialog inspecting standalone image records and people lists."""
+        graph_src = self.entry_mg_graph.get().strip()
+        if not graph_src:
+            messagebox.showinfo("Evidence Viewer", "Please select a graph bundle (.pkl) file first.", parent=self)
+            return
+
+        try:
+            from utilities.graph_storage import find_graph_data_file, load_graph_data, ensure_image_records
+            src_path = Path(graph_src).resolve()
+            bundle_file = find_graph_data_file(src_path) if src_path.suffix.lower() != ".pkl" else src_path
+            if not bundle_file or not bundle_file.is_file():
+                messagebox.showerror("Error", f"No graph data bundle found for {src_path.name}", parent=self)
+                return
+
+            bundle = load_graph_data(bundle_file)
+            image_records = ensure_image_records(bundle)
+            cluster_names = bundle.get("cluster_names", {})
+        except Exception as exc:
+            messagebox.showerror("Error", f"Could not load image records: {exc}", parent=self)
+            return
+
+        win = tk.Toplevel(self)
+        win.title(f"Standalone Evidence & Image Records — {bundle_file.name}")
+        win.geometry("860x520")
+        win.transient(self)
+
+        top_info = ttk.Label(
+            win,
+            text=f"Standalone Images: {len(image_records)}  |  Identified People: {len(cluster_names)}  |  Part 2: Each row is an image containing people IDs.",
+            padding=10,
+            font=("Segoe UI", 9, "bold"),
+        )
+        top_info.pack(side="top", fill="x")
+
+        frame_tree = ttk.Frame(win, padding=10)
+        frame_tree.pack(fill="both", expand=True)
+
+        cols = ("idx", "image", "event", "faces", "people")
+        tree = ttk.Treeview(frame_tree, columns=cols, show="headings", selectmode="browse")
+        tree.heading("idx", text="#")
+        tree.heading("image", text="Image ID")
+        tree.heading("event", text="Event")
+        tree.heading("faces", text="Faces")
+        tree.heading("people", text="People IDs in Image")
+
+        tree.column("idx", width=40, anchor="center")
+        tree.column("image", width=180, anchor="w")
+        tree.column("event", width=180, anchor="w")
+        tree.column("faces", width=60, anchor="center")
+        tree.column("people", width=380, anchor="w")
+
+        v_scroll = ttk.Scrollbar(frame_tree, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=v_scroll.set)
+        v_scroll.pack(side="right", fill="y")
+        tree.pack(side="left", fill="both", expand=True)
+
+        for i, row in enumerate(image_records, start=1):
+            img_id = row.get("image_id", Path(row.get("image_path", "")).name)
+            ev = row.get("event", "")
+            fc = row.get("face_count", len(row.get("people", [])))
+            ppl_str = ", ".join(row.get("people", [])) or "(None / Noise)"
+            tree.insert("", "end", values=(i, img_id, ev, fc, ppl_str))
+
+        btn_close = ttk.Button(win, text="Close", command=win.destroy)
+        btn_close.pack(side="bottom", pady=8)
 
     # ── Add Images action ─────────────────────────────────────────────────────
 
@@ -1554,6 +1740,17 @@ class SocialGraphGUI(tk.Tk):
                     messagebox.showerror(
                         "Error", f"Failed to update graph:\n\n{data}", parent=self
                     )
+                elif msg_type == "mg_rebuild_done":
+                    self.mg_rebuild_result_html = data if data else None
+                    self.btn_mg_rebuild.configure(state="normal")
+                    if data and os.path.exists(data):
+                        self.btn_mg_open_rebuild_result.configure(state="normal")
+                    self._mg_log("[Success] Graph rebuilt with the current code formula.")
+                    messagebox.showinfo("Success", f"Graph rebuilt!\n\nHTML: {data}", parent=self)
+                elif msg_type == "mg_rebuild_error":
+                    self.btn_mg_rebuild.configure(state="normal")
+                    self._mg_log(f"[Error] Failed to rebuild graph: {data}")
+                    messagebox.showerror("Error", f"Failed to rebuild graph:\n\n{data}", parent=self)
                 elif msg_type == "mg_prune_done":
                     self.mg_prune_result_html = data if data else None
                     self.btn_mg_prune.configure(state="normal")

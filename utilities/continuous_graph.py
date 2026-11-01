@@ -8,9 +8,10 @@ interactive HTML & JSON graphs along with the serialized state bundle.
 from __future__ import annotations
 
 import argparse
+import datetime
 from pathlib import Path
 import sys
-from typing import Callable
+from typing import Any, Callable
 
 import cv2
 from insightface.app import FaceAnalysis
@@ -33,7 +34,10 @@ from create_social_graph import (
     match_profiles_to_identities,
 )
 from utilities.graph_storage import (
+    build_image_records,
+    build_person_crops,
     crop_to_data_uri,
+    ensure_image_records,
     find_graph_data_file,
     load_graph_data,
     save_graph_data,
@@ -300,9 +304,31 @@ def update_graph_with_images(
     )
 
     check_cancel()
-    # Extract representative crops
-    crops = prepare_bundle_node_crops(all_face_records, labels, cluster_names)
+    # Extract representative crops (Part 1: Highest quality images mapped to each person ID)
+    person_crops, crops = build_person_crops(all_face_records, labels, cluster_names)
+    if not crops:
+        crops = prepare_bundle_node_crops(all_face_records, labels, cluster_names)
 
+    # Build standalone image records (Part 2: each row is an image containing people IDs as a list)
+    previous_event_by_path = {}
+    for row in bundle.get("image_records", []):
+        row_path = row.get("image_path")
+        if row_path:
+            previous_event_by_path[str(Path(row_path).resolve()).lower()] = row.get("event", "")
+    previous_event_images = [
+        (
+            previous_event_by_path.get(str(Path(image_path).resolve()).lower(), Path(image_path).parent.name),
+            Path(image_path),
+        )
+        for image_path in prev_processed_images
+    ]
+    image_records = build_image_records(
+        event_images=previous_event_images + new_event_images,
+        face_records=all_face_records,
+        labels=labels,
+        cluster_names=cluster_names,
+        image_face_counts=all_image_face_counts,
+    )
     check_cancel()
     # Construct updated graph
     set_status("Rebuilding updated social network graph...")
@@ -312,6 +338,7 @@ def update_graph_with_images(
         cluster_names=cluster_names,
         image_face_counts=all_image_face_counts,
         remove_isolated=remove_isolated_val,
+        image_records=image_records,
         on_log=on_log,
     )
 
@@ -328,6 +355,7 @@ def update_graph_with_images(
             "cluster_count": len(cluster_names),
             "removed_isolated": remove_isolated_val,
             "continuous_update": True,
+            "image_records_count": len(image_records),
         },
     )
     log(f"Updated JSON graph saved to: {out_json}")
@@ -348,6 +376,8 @@ def update_graph_with_images(
         image_face_counts=all_image_face_counts,
         labels=labels,
         cluster_names=cluster_names,
+        image_records=image_records,
+        person_crops=person_crops,
         profile_vectors=all_profile_vectors,
         profile_names=all_profile_names,
         processed_images=all_processed_images,
@@ -363,12 +393,180 @@ def update_graph_with_images(
             "previous_bundle": str(bundle_file),
             "new_images_added": len(new_event_images),
             "new_faces_added": len(new_records),
+            "image_records_count": len(image_records),
+            "standalone": True,
         },
     )
     log(f"Updated graph data bundle saved to: {out_data}")
 
     set_status("Update complete!")
     log(f"Successfully updated graph: now has {len(graph.nodes)} people and {len(graph.edges)} connections.")
+    return out_html, out_json, out_data
+
+
+def rebuild_graph_from_bundle(
+    graph_source: Path | str | dict[str, Any],
+    *,
+    output_html: Path | str | None = None,
+    output_json: Path | str | None = None,
+    output_bundle: Path | str | None = None,
+    small_group_weight: float = 5.0,
+    small_group_max_faces: int = 3,
+    large_group_weight: float = 2.0,
+    event_weight: float = 1.0,
+    event_popularity_multiplier: float = 50.0,
+    degree_popularity_multiplier: float = 1.0,
+    remove_isolated: bool = True,
+    on_log: Callable[[str], None] | None = None,
+    on_status: Callable[[str], None] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+) -> tuple[nx.Graph, Path | None, Path | None, Path | None]:
+    """Rebuild social graph from a standalone bundle using the formula defined in code.
+
+    Operates in milliseconds without running face detection or DBSCAN clustering.
+    Uses Part 1 (highest quality person crops) and Part 2 (image rows with people IDs).
+
+    Parameters
+    ----------
+    graph_source : Path, str, or dict
+        Path to .graph_data.pkl (or companion html/json), or pre-loaded bundle dict.
+    output_html : Path or str, optional
+        Destination for interactive HTML.
+    output_json : Path or str, optional
+        Destination for JSON graph.
+    output_bundle : Path or str, optional
+        Destination for updated .graph_data.pkl bundle.
+    small_group_weight, small_group_max_faces, large_group_weight, event_weight,
+    event_popularity_multiplier, degree_popularity_multiplier, remove_isolated : float/int/bool
+        Formula configuration parameters.
+    """
+    def log(msg: str):
+        if on_log:
+            on_log(msg)
+        else:
+            print(msg)
+
+    def set_status(st: str):
+        if on_status:
+            on_status(st)
+
+    def check_cancel():
+        if is_cancelled and is_cancelled():
+            raise InterruptedError("Operation cancelled by user.")
+
+    set_status("Loading standalone graph bundle...")
+    if isinstance(graph_source, dict):
+        bundle = dict(graph_source)
+        source_name = "in-memory bundle"
+        bundle_file = None
+    else:
+        src_path = Path(graph_source).resolve()
+        bundle_file = find_graph_data_file(src_path) if src_path.suffix.lower() != ".pkl" else src_path
+        if not bundle_file or not bundle_file.is_file():
+            raise FileNotFoundError(f"Could not locate graph data bundle (.graph_data.pkl) for: {src_path}")
+        source_name = bundle_file.name
+        log(f"Loading standalone bundle: {bundle_file.name}")
+        bundle = load_graph_data(bundle_file)
+
+    check_cancel()
+    # Part 2: Standalone image records where each row is an image containing people IDs
+    image_records = ensure_image_records(bundle)
+    cluster_names = bundle.get("cluster_names", {})
+
+    # Part 1: Highest quality person crops
+    crops = bundle.get("crops", {})
+    if not crops and "person_crops" in bundle:
+        crops = {k: v.get("data_uri") for k, v in bundle["person_crops"].items() if v.get("data_uri")}
+
+    log(f"Loaded {len(image_records)} standalone image records across {len(cluster_names)} person identities.")
+    log(f"Applying formula: small_group={small_group_weight} (<= {small_group_max_faces} faces), large_group={large_group_weight}, event_weight={event_weight}, event_pop_mult={event_popularity_multiplier}, degree_pop_mult={degree_popularity_multiplier}, remove_isolated={remove_isolated}")
+
+    set_status("Constructing social network with the current code formula...")
+    graph = construct_graph(
+        cluster_names=cluster_names,
+        remove_isolated=remove_isolated,
+        image_records=image_records,
+        small_group_weight=small_group_weight,
+        small_group_max_faces=small_group_max_faces,
+        large_group_weight=large_group_weight,
+        event_weight=event_weight,
+        event_popularity_multiplier=event_popularity_multiplier,
+        degree_popularity_multiplier=degree_popularity_multiplier,
+        on_log=on_log,
+    )
+
+    check_cancel()
+    out_html_path: Path | None = None
+    out_json_path: Path | None = None
+    out_bundle_path: Path | None = None
+
+    if output_html:
+        out_html_path = Path(output_html).resolve()
+        out_html_path.parent.mkdir(parents=True, exist_ok=True)
+        set_status("Exporting interactive HTML visualization...")
+        export_graph_html(graph=graph, crops=crops, output_path=out_html_path)
+        log(f"Interactive HTML graph exported to: {out_html_path}")
+
+    if output_json:
+        out_json_path = Path(output_json).resolve()
+        out_json_path.parent.mkdir(parents=True, exist_ok=True)
+        set_status("Exporting JSON graph...")
+        export_graph_json(
+            graph=graph,
+            crops=crops,
+            output_path=out_json_path,
+            metadata={
+                "rebuilt_from": source_name,
+                "formula": {
+                    "small_group_weight": small_group_weight,
+                    "small_group_max_faces": small_group_max_faces,
+                    "large_group_weight": large_group_weight,
+                    "event_weight": event_weight,
+                    "event_popularity_multiplier": event_popularity_multiplier,
+                    "degree_popularity_multiplier": degree_popularity_multiplier,
+                },
+                "image_records_count": len(image_records),
+            },
+        )
+        log(f"JSON graph exported to: {out_json_path}")
+
+    if output_bundle:
+        out_bundle_path = Path(output_bundle).resolve()
+        out_bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        set_status("Saving updated standalone graph bundle...")
+        params = dict(bundle.get("params", {}))
+        params["formula"] = {
+            "small_group_weight": small_group_weight,
+            "small_group_max_faces": small_group_max_faces,
+            "large_group_weight": large_group_weight,
+            "event_weight": event_weight,
+            "event_popularity_multiplier": event_popularity_multiplier,
+            "degree_popularity_multiplier": degree_popularity_multiplier,
+        }
+        meta = dict(bundle.get("metadata", {}))
+        meta["rebuilt_from"] = source_name
+        meta["rebuilt_at"] = datetime.datetime.now().isoformat()
+        save_graph_data(
+            out_bundle_path,
+            graph=graph,
+            crops=crops,
+            embeddings=bundle.get("embeddings", np.empty((0, 512), dtype=np.float32)),
+            face_records=bundle.get("face_records", []),
+            image_face_counts=bundle.get("image_face_counts", {}),
+            labels=bundle.get("labels", np.array([])),
+            cluster_names=cluster_names,
+            image_records=image_records,
+            person_crops=bundle.get("person_crops"),
+            profile_vectors=bundle.get("profile_vectors"),
+            profile_names=bundle.get("profile_names"),
+            processed_images=bundle.get("processed_images"),
+            params=params,
+            metadata=meta,
+        )
+        log(f"Updated standalone graph bundle saved to: {out_bundle_path}")
+
+    set_status(f"Graph rebuild complete ({len(graph.nodes)} people, {len(graph.edges)} connections)!")
+    return graph, out_html_path, out_json_path, out_bundle_path
 
     return out_html, out_json, out_data
 
