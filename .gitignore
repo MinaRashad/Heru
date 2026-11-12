@@ -3,6 +3,7 @@ photos/
 
 # Source data
 *.csv
+*.pkl
 
 # Image downloader script
 download_images.py
